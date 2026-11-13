@@ -1,13 +1,16 @@
 import { fretMidi, pcOf } from '../music/theory';
 import type { Question, Scheduler } from './scheduler';
 
-export type Phase = 'asking' | 'revealed' | 'feedback' | 'done';
+export type Phase = 'intro' | 'asking' | 'revealed' | 'feedback' | 'done';
 
 export interface AnswerResult {
   question: Question;
   /** Right on the first note played, without the answer being shown. */
   firstTry: boolean;
   ms: number;
+  /** Where the answer was played, when that is known (string modes, or a click). */
+  string: number | null;
+  fret: number | null;
   revealed: boolean;
   mistakes: number;
   /** Combo count after this answer. */
@@ -29,11 +32,15 @@ const MIN_REACTION_MS = 150;
 /**
  * One practice round as a small state machine, independent of audio and UI.
  *
+ * intro -> (play the root, or skip) -> asking      [scale positions only, once per box]
  * asking -> (correct note) -> feedback -> next question
  * asking -> (12 s or skip) -> revealed -> (play it, or skip) -> feedback -> next question
  *
  * A wrong note does not end the question: you keep looking until you find it, because finding it
  * yourself is what builds the memory. It does mark the question as a miss for the statistics.
+ *
+ * Entering a new scale box starts with an untimed step: play the root. Getting your hand into
+ * the box is not what is being measured, so the clock only runs for the degrees that follow.
  */
 export class Session {
   phase: Phase = 'asking';
@@ -51,19 +58,37 @@ export class Session {
 
   constructor(
     private readonly scheduler: Scheduler,
-    readonly total: number,
+    public total: number,
     now: number,
     private readonly onResult: (result: AnswerResult) => void = () => {},
   ) {
     this.question = scheduler.next();
     this.askedAt = now;
+    if (this.question.position) this.phase = 'intro';
+  }
+
+  /** Pitches of the root inside the current box. */
+  private rootMidis(): number[] {
+    const position = this.question.position;
+    if (!position) return [];
+    return position.cells.filter((c) => c.degree === '1').map((c) => fretMidi(c.string, c.fret));
+  }
+
+  private begin(t: number) {
+    this.phase = 'asking';
+    this.askedAt = t;
+    this.hint = null;
   }
 
   /** A new note started sounding. */
   noteOn(midi: number, t: number) {
+    if (this.phase === 'intro') {
+      if (t - this.askedAt >= MIN_REACTION_MS && this.rootMidis().includes(midi)) this.begin(t);
+      return;
+    }
     if (this.phase !== 'asking' && this.phase !== 'revealed') return;
     if (t - this.askedAt < MIN_REACTION_MS) return;
-    if (this.question.targets.includes(midi)) this.resolve(t, true);
+    if (this.question.targets.includes(midi)) this.resolve(t, true, midi);
   }
 
   /** A note has been held long enough to count as a deliberate answer. */
@@ -82,19 +107,25 @@ export class Session {
 
   /** Fallback input without a guitar: clicking a fret on the on-screen fretboard. */
   click(string: number, fret: number, t: number) {
+    const midi = fretMidi(string, fret);
+    if (this.phase === 'intro') {
+      if (this.question.position?.cells.some((c) => c.degree === '1' && c.string === string && c.fret === fret)) this.begin(t);
+      return;
+    }
     if (this.phase !== 'asking' && this.phase !== 'revealed') return;
-    if (string !== this.question.string) {
+    if (this.question.string !== null && string !== this.question.string) {
       this.miss({ kind: 'wrongString', string });
       return;
     }
-    const midi = fretMidi(string, fret);
-    if (this.question.targets.includes(midi)) this.resolve(t, true);
+    if (this.question.cells.some((c) => c.string === string && c.fret === fret)) this.resolve(t, true, midi, string);
+    else if (pcOf(midi) === this.question.pc) this.hint = { kind: 'octave', midi };
     else this.miss({ kind: 'wrong', midi });
   }
 
-  /** Space bar: show the answer, or move on once it is shown. */
+  /** Space bar: start the box, show the answer, or move on once it is shown. */
   skip(t: number) {
-    if (this.phase === 'asking') this.reveal();
+    if (this.phase === 'intro') this.begin(t);
+    else if (this.phase === 'asking') this.reveal();
     else if (this.phase === 'revealed') this.resolve(t, false);
     else if (this.phase === 'feedback') this.advance(t);
   }
@@ -124,19 +155,22 @@ export class Session {
     this.phase = 'revealed';
   }
 
-  private resolve(t: number, played: boolean) {
+  private resolve(t: number, played: boolean, midi?: number, clickedString?: number) {
     const firstTry = played && !this.revealed && this.mistakes === 0;
     if (firstTry) {
       this.combo++;
       this.bestCombo = Math.max(this.bestCombo, this.combo);
     } else {
       this.combo = 0;
-      this.scheduler.requeue(this.question);
+      if (this.scheduler.requeue(this.question)) this.total++;
     }
+    const string = this.question.string ?? clickedString ?? null;
     const result: AnswerResult = {
       question: this.question,
       firstTry,
       ms: t - this.askedAt,
+      string,
+      fret: midi !== undefined && string !== null ? midi - fretMidi(string, 0) : null,
       revealed: this.revealed,
       mistakes: this.mistakes,
       combo: this.combo,
@@ -155,11 +189,12 @@ export class Session {
       this.phase = 'done';
       return;
     }
+    const previous = this.question.position;
     this.question = this.scheduler.next();
     this.askedAt = t;
     this.mistakes = 0;
     this.revealed = false;
     this.hint = null;
-    this.phase = 'asking';
+    this.phase = this.question.position && this.question.position !== previous ? 'intro' : 'asking';
   }
 }

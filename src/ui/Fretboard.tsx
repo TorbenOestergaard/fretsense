@@ -15,6 +15,10 @@ interface Props {
   highlightString?: number | null;
   onCellClick?: (string: number, fret: number) => void;
   label: string;
+  /** Highest fret drawn. */
+  maxFret?: number;
+  /** Fret range to shade, e.g. the scale position being practised. */
+  band?: { lo: number; hi: number } | null;
 }
 
 const W = 1000;
@@ -23,25 +27,29 @@ const OPEN_W = 56;
 const RIGHT = 10;
 const TOP = 26;
 const ROW = 34;
-const FRET_W = (W - LEFT - OPEN_W - RIGHT) / MAX_FRET;
 const NUT_X = LEFT + OPEN_W;
 const BOTTOM = TOP + (STRING_COUNT - 1) * ROW;
 const H = BOTTOM + 46;
 const INLAYS = [3, 5, 7, 9];
 
-const fretX = (fret: number) => (fret === 0 ? LEFT + OPEN_W / 2 : NUT_X + (fret - 0.5) * FRET_W);
 /** High E on top, low E at the bottom - the same way tab and chord diagrams are drawn. */
 const stringY = (string: number) => TOP + (STRING_COUNT - 1 - string) * ROW;
 
-export function Fretboard({ cell, highlightString = null, onCellClick, label }: Props) {
+export function Fretboard({ cell, highlightString = null, onCellClick, label, maxFret = MAX_FRET, band = null }: Props) {
+  const FRET_W = (W - LEFT - OPEN_W - RIGHT) / maxFret;
+  const fretX = (fret: number) => (fret === 0 ? LEFT + OPEN_W / 2 : NUT_X + (fret - 0.5) * FRET_W);
   const strings = Array.from({ length: STRING_COUNT }, (_, s) => s);
-  const frets = Array.from({ length: MAX_FRET + 1 }, (_, f) => f);
+  const frets = Array.from({ length: maxFret + 1 }, (_, f) => f);
   const midY = (TOP + BOTTOM) / 2;
+  const inlays = INLAYS.concat(15).filter((f) => f <= maxFret);
+  const bandX = band ? (band.lo === 0 ? LEFT : NUT_X + (band.lo - 1) * FRET_W) : 0;
+  const bandW = band ? NUT_X + band.hi * FRET_W - bandX : 0;
 
   return (
     <svg className="fretboard" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label}>
       <rect x={NUT_X} y={TOP - 15} width={W - RIGHT - NUT_X} height={BOTTOM - TOP + 30} rx={6} className="fb-board" />
-      {INLAYS.map((f) => (
+      {band && <rect x={bandX} y={TOP - 15} width={bandW} height={BOTTOM - TOP + 30} rx={6} className="fb-band" />}
+      {inlays.map((f) => (
         <circle key={f} cx={fretX(f)} cy={midY} r={7} className="fb-inlay" />
       ))}
       <circle cx={fretX(12)} cy={midY - ROW} r={7} className="fb-inlay" />
@@ -76,7 +84,7 @@ export function Fretboard({ cell, highlightString = null, onCellClick, label }: 
           x={fretX(f)}
           y={BOTTOM + 38}
           textAnchor="middle"
-          className={INLAYS.includes(f) || f === 12 ? 'fb-num fb-num-mark' : 'fb-num'}
+          className={inlays.includes(f) || f === 12 ? 'fb-num fb-num-mark' : 'fb-num'}
         >
           {f === 0 ? 'open' : f}
         </text>

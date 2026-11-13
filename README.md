@@ -21,31 +21,51 @@ npm test
 
 ## How it teaches
 
-The unit of memory is *this note on this string*: 6 strings × 12 notes = 72 items (fret 12
-repeats the open string). For each item the app tracks how often your first attempt is right and
-how long it takes. A note only counts as known when it is both right and fast, because "working
-it out from the low E string" is exactly the habit to replace with recall.
+There are three exercises. Each keeps its own statistics, because they are not equally hard.
 
-| Mode | Prompt | What it builds |
+| Exercise | Prompt | What it builds |
 | --- | --- | --- |
-| Note finder | "Play C on the G string" | Direct recall of each position |
-| Scale degrees | "In G major, play the 3rd on the D string" | Each note's role in a key |
+| Note finder | "Play C on the G string" | Direct recall of each note on each string |
+| Scale positions | "G major, position 2: play the 5th" | Where every degree sits inside each of the five boxes |
 | String sweep | "Every C, low to high" | The same note across all strings (octave shapes) |
 
-- **Adaptive.** Slow, missed, new and long-unseen notes are asked more often; solid ones still
-  come back occasionally. Strings you already know fade into the background on their own.
-- **Missed notes return** three questions later, while the correction is fresh.
-- **You always find the note yourself.** A wrong note does not end the question. After 12 seconds
-  (or Space) the position is shown, and you play it to continue.
-- **Scale context.** In scale-degree mode the answer shows the whole scale along that string,
-  labelled by degree, with the root ringed. Major, natural minor and both pentatonics, 12 keys.
-- **Progress you can see.** The home screen is the neck itself, coloured per note from New
-  through Shaky, Learning and Solid to Instant, with per-string bars, XP, levels, combos, a
-  daily goal of 40 correct notes, a day streak and a response-time trend.
+**Note finder and String sweep** track *this note on this string*: 6 strings × 12 notes = 72
+items (fret 12 repeats the open string). The Note finder is adaptive: slow, missed, new and
+long-unseen notes are asked more often, and a missed note returns three questions later.
 
-Suggested routine: 5–10 minutes a day. Start with naturals only on the D, G and B strings, switch
-on sharps and flats once those rows turn green, and mix in a scale-degree round in the key you
-are currently playing in.
+**Scale positions** takes one box at a time, in a key and scale you choose (major, natural
+minor, major or minor pentatonic). A box starts with an untimed step, *play the root*, to get
+your hand in place. Then every degree of the scale is asked once in random order, and any place
+that degree occurs inside the box counts. A missed degree is asked again before the box is
+left. Then the next box. It tracks *this degree in this box of this scale type*, independent of
+key. Minor boxes are numbered from the one with the root under the first finger on the low E
+string. You choose what the board shows while asking: the scale shape, the roots only, or
+nothing.
+
+In every exercise a wrong note does not end the question. After 12 seconds (or Space) the
+answer is shown, and you play it to continue.
+
+### Status and progress
+
+A note only counts as known when it is both right and fast, because "working it out from the
+low E string" is the habit to replace with recall. Each attempt scores 0 for a miss, or between
+0 and 1 by speed for a first-try answer (2 s or faster is full marks, 8 s or slower is none).
+
+The status of an item (New, Shaky, Learning, Solid, Instant) is the average of its last eight
+attempts, and fewer than four attempts are averaged as if the missing ones scored zero. That
+damps it in both directions: one lucky fast answer makes a note Shaky, not Instant, and it takes
+four to get there; one slip or slow answer on a well-known note leaves it Instant, two drop it
+to Solid.
+
+The **Progress** view shows, per exercise: the status map, the same map coloured by average
+time, average time per string, note and fret (or per position and degree), and average time
+and first-try rate per practice day. The timing charts can be limited to naturals or to sharps
+and flats, so days with harder material do not look like a step back. A stamina chart shows
+correct notes per day against the daily goal of 40, across all exercises.
+
+Suggested routine: 5–10 minutes a day. Start with naturals only on the D, G and B strings in the
+Note finder, switch on sharps and flats once those rows turn green, and add a Scale positions
+round in the key you are currently playing in.
 
 ## How the listening works
 
@@ -68,7 +88,8 @@ events.
 A microphone hears pitch, not position. C3 at fret 8 of the low E string and C3 at fret 3 of the
 A string are the same sound. The app checks the exact octave the asked string produces, which
 catches most wrong-string answers, but where two strings overlap it trusts you to be on the
-string that is highlighted. If you play the right note name in another octave you get a nudge
+string that is highlighted. In Scale positions no pitch occurs twice inside a box, so there the
+pitch does identify the place. If you play the right note name in another octave you get a nudge
 rather than a penalty, since that can also be the detector slipping an octave.
 
 It also listens for one note at a time. Mute the other strings.
@@ -121,7 +142,8 @@ src/music/theory.ts     tuning, note names, scales, degree spelling
 src/audio/pitch.ts      pitch + level + noise gate per analysis window
 src/audio/noteTracker.ts  pitch stream -> one event per pluck
 src/audio/mic.ts        microphone / test-tone source, Web Audio wiring
-src/game/progress.ts    per-note stats, mastery, XP, streaks, localStorage
+src/game/progress.ts    per-exercise stats, mastery, answer log, XP, streaks, localStorage
+src/game/analytics.ts   averages per string, note, fret, position and day from the answer log
 src/game/scheduler.ts   what to ask next
 src/game/session.ts     one round as a state machine
 src/ui/                 React screens
@@ -131,7 +153,7 @@ Progress is stored in the browser's localStorage for `localhost:5183`.
 
 ## Ideas for later
 
-- Position mode: stay inside one of the five major-scale positions and find degrees there.
+- Scale positions across two octaves in order (1 to 8 and back), and modes of the major scale.
 - Frets 13 and up.
 - Intervals from a moving root ("a major 3rd above this note, on the next string").
 - Export and import of progress.

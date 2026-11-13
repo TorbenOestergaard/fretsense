@@ -1,20 +1,28 @@
-import { DAILY_GOAL, dayKey, levelInfo, progressStore, streakOf, type Mode, type ProgressData } from '../game/progress';
-import { SCALES, SCALE_IDS, STRING_NAMES, buildScale, degreeOrdinal, parseNote } from '../music/theory';
+import { DAILY_GOAL, dayKey, levelInfo, progressStore, streakOf, type Mode, type PositionHelp } from '../game/progress';
+import { SCALES, SCALE_IDS, STRING_NAMES, buildScale, parseNote, positionsOf } from '../music/theory';
+import { positionFrets } from './Game';
 import { useMicState, useProgress } from './hooks';
-import { MasteryMap } from './MasteryMap';
+import { MasteryMap, PositionGrid } from './MasteryMap';
 
 const MODES: { id: Mode; title: string; blurb: string }[] = [
   { id: 'notes', title: 'Note finder', blurb: '“Play C on the G string.” Random notes, weighted toward the ones you are slow on.' },
-  { id: 'degrees', title: 'Scale degrees', blurb: '“In G major, play the 3rd on the D string.” Ties every note to its role in a key.' },
+  { id: 'positions', title: 'Scale positions', blurb: '“G major, position 2: play the 5th.” Every degree of one box in random order, then the next box.' },
   { id: 'sweep', title: 'String sweep', blurb: 'One note on every string, low to high. The classic “find every C” drill.' },
+];
+
+const HELP: { id: PositionHelp; label: string }[] = [
+  { id: 'shape', label: 'Scale shape' },
+  { id: 'roots', label: 'Roots only' },
+  { id: 'none', label: 'Nothing' },
 ];
 
 interface Props {
   onStart: () => void;
   onMic: () => void;
+  onProgress: () => void;
 }
 
-export function Home({ onStart, onMic }: Props) {
+export function Home({ onStart, onMic, onProgress }: Props) {
   const data = useProgress();
   const micState = useMicState();
   const { settings } = data;
@@ -25,6 +33,12 @@ export function Home({ onStart, onMic }: Props) {
   const tonic = scaleType.tonics.includes(settings.tonic) ? settings.tonic : scaleType.tonics[0];
   const scale = buildScale(tonic, settings.scaleId);
   const set = progressStore.updateSettings;
+  const inPositions = settings.mode === 'positions';
+  const boxes = positionsOf(scale);
+  const togglePosition = (p: number) => {
+    const positions = settings.positions.map((on, i) => (i === p ? !on : on));
+    if (positions.some(Boolean)) set({ positions });
+  };
 
   const toggleString = (s: number) => {
     const strings = settings.strings.map((on, i) => (i === s ? !on : on));
@@ -59,7 +73,13 @@ export function Home({ onStart, onMic }: Props) {
       </header>
 
       <section className="panel">
-        <MasteryMap data={data} />
+        {settings.mode === 'positions' ? <PositionGrid data={data} scaleId={settings.scaleId} /> : <MasteryMap data={data} mode={settings.mode} />}
+        <div className="panel-foot">
+          <span className="muted small">Each exercise keeps its own status. This is the one for the exercise selected below.</span>
+          <button className="ghost" onClick={onProgress}>
+            Progress and timing
+          </button>
+        </div>
       </section>
 
       <section className="panel">
@@ -80,81 +100,114 @@ export function Home({ onStart, onMic }: Props) {
         </div>
 
         <div className="options">
-          <div className="option">
-            <span className="option-label">Strings</span>
-            <div className="chips">
-              {[0, 1, 2, 3, 4, 5].map((s) => (
-                <button
-                  key={s}
-                  className={settings.strings[s] ? 'chip chip-on' : 'chip'}
-                  aria-pressed={settings.strings[s]}
-                  onClick={() => toggleString(s)}
-                >
-                  {STRING_NAMES[s]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {settings.mode === 'degrees' ? (
-            <div className="option">
-              <span className="option-label">Key</span>
-              <div className="row">
-                <select value={tonic} onChange={(e) => set({ tonic: e.target.value })} aria-label="Key">
-                  {scaleType.tonics.map((t) => (
-                    <option key={t} value={t}>
-                      {parseNote(t).display}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={settings.scaleId}
-                  aria-label="Scale"
-                  onChange={(e) => {
-                    const scaleId = e.target.value as typeof settings.scaleId;
-                    const tonics = SCALES[scaleId].tonics;
-                    set({ scaleId, tonic: tonics.includes(tonic) ? tonic : tonics[0] });
-                  }}
-                >
-                  {SCALE_IDS.map((id) => (
-                    <option key={id} value={id}>
-                      {SCALES[id].name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="ghost"
-                  onClick={() => set({ tonic: scaleType.tonics[Math.floor(Math.random() * scaleType.tonics.length)] })}
-                >
-                  Random key
-                </button>
+          {inPositions ? (
+            <>
+              <div className="option">
+                <span className="option-label">Key</span>
+                <div className="row">
+                  <select value={tonic} onChange={(e) => set({ tonic: e.target.value })} aria-label="Key">
+                    {scaleType.tonics.map((t) => (
+                      <option key={t} value={t}>
+                        {parseNote(t).display}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={settings.scaleId}
+                    aria-label="Scale"
+                    onChange={(e) => {
+                      const scaleId = e.target.value as typeof settings.scaleId;
+                      const tonics = SCALES[scaleId].tonics;
+                      set({ scaleId, tonic: tonics.includes(tonic) ? tonic : tonics[0] });
+                    }}
+                  >
+                    {SCALE_IDS.map((id) => (
+                      <option key={id} value={id}>
+                        {SCALES[id].name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="ghost"
+                    onClick={() => set({ tonic: scaleType.tonics[Math.floor(Math.random() * scaleType.tonics.length)] })}
+                  >
+                    Random key
+                  </button>
+                </div>
+                <p className="muted small">{scale.notes.map((n) => `${n.degree} ${n.name}`).join('   ')}</p>
               </div>
-              <p className="muted small">{scale.notes.map((n) => `${n.degree} ${n.name}`).join('   ')}</p>
-            </div>
+              <div className="option">
+                <span className="option-label">Positions</span>
+                <div className="chips">
+                  {boxes.map((box) => (
+                    <button
+                      key={box.index}
+                      className={settings.positions[box.index] ? 'chip chip-on' : 'chip'}
+                      aria-pressed={settings.positions[box.index]}
+                      onClick={() => togglePosition(box.index)}
+                      title={box.shape}
+                    >
+                      {box.index + 1} <span className="chip-sub">{positionFrets(box)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="option">
+                <span className="option-label">Show on the board while asking</span>
+                <div className="chips">
+                  {HELP.map((h) => (
+                    <button
+                      key={h.id}
+                      className={settings.positionHelp === h.id ? 'chip chip-on' : 'chip'}
+                      aria-pressed={settings.positionHelp === h.id}
+                      onClick={() => set({ positionHelp: h.id })}
+                    >
+                      {h.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
           ) : (
-            <div className="option">
-              <span className="option-label">Notes</span>
-              <div className="chips">
-                <button className={settings.naturalsOnly ? 'chip chip-on' : 'chip'} aria-pressed={settings.naturalsOnly} onClick={() => set({ naturalsOnly: true })}>
-                  Naturals only
-                </button>
-                <button className={!settings.naturalsOnly ? 'chip chip-on' : 'chip'} aria-pressed={!settings.naturalsOnly} onClick={() => set({ naturalsOnly: false })}>
-                  With sharps and flats
-                </button>
+            <>
+              <div className="option">
+                <span className="option-label">Strings</span>
+                <div className="chips">
+                  {[0, 1, 2, 3, 4, 5].map((s) => (
+                    <button
+                      key={s}
+                      className={settings.strings[s] ? 'chip chip-on' : 'chip'}
+                      aria-pressed={settings.strings[s]}
+                      onClick={() => toggleString(s)}
+                    >
+                      {STRING_NAMES[s]}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+              <div className="option">
+                <span className="option-label">Notes</span>
+                <div className="chips">
+                  <button className={settings.naturalsOnly ? 'chip chip-on' : 'chip'} aria-pressed={settings.naturalsOnly} onClick={() => set({ naturalsOnly: true })}>
+                    Naturals only
+                  </button>
+                  <button className={!settings.naturalsOnly ? 'chip chip-on' : 'chip'} aria-pressed={!settings.naturalsOnly} onClick={() => set({ naturalsOnly: false })}>
+                    With sharps and flats
+                  </button>
+                </div>
+              </div>
+              <div className="option">
+                <span className="option-label">Round length</span>
+                <div className="chips">
+                  {[10, 20, 40].map((n) => (
+                    <button key={n} className={settings.length === n ? 'chip chip-on' : 'chip'} aria-pressed={settings.length === n} onClick={() => set({ length: n })}>
+                      {n} notes
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
-
-          <div className="option">
-            <span className="option-label">Round length</span>
-            <div className="chips">
-              {[10, 20, 40].map((n) => (
-                <button key={n} className={settings.length === n ? 'chip chip-on' : 'chip'} aria-pressed={settings.length === n} onClick={() => set({ length: n })}>
-                  {n} notes
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         <div className="start-row">
@@ -173,69 +226,6 @@ export function Home({ onStart, onMic }: Props) {
         {micState.message && <p className="warn">{micState.message}</p>}
       </section>
 
-      <Trends data={data} />
     </main>
-  );
-}
-
-function Trends({ data }: { data: ProgressData }) {
-  const sessions = data.sessions.slice(-20);
-  const degreeOrder = ['1', '2', '♭3', '3', '4', '5', '♭6', '6', '♭7', '7'];
-  const degrees = degreeOrder.filter((label) => data.degrees[label]);
-  if (sessions.length === 0 && degrees.length === 0) return null;
-
-  const times = sessions.map((s) => s.avgMs / 1000);
-  const max = Math.max(...times, 1);
-  const W = 600;
-  const H = 90;
-  const x = (i: number) => (sessions.length === 1 ? W / 2 : 8 + (i / (sessions.length - 1)) * (W - 16));
-  const y = (v: number) => 8 + (1 - v / max) * (H - 16);
-  const last = sessions[sessions.length - 1];
-
-  return (
-    <section className="panel">
-      <h2>Trend</h2>
-      {sessions.length > 0 && (
-        <div className="trend">
-          <div>
-            <p className="muted small">Average answer time over your last {sessions.length} {sessions.length === 1 ? 'round' : 'rounds'}. Lower is better.</p>
-            <p className="trend-now">
-              {(last.avgMs / 1000).toFixed(1)} s <span className="muted">· {Math.round((last.correct / last.n) * 100)}% first try in the latest round</span>
-            </p>
-          </div>
-          <svg viewBox={`0 0 ${W} ${H}`} className="spark" role="img" aria-label="Average answer time per round">
-            <polyline points={times.map((v, i) => `${x(i)},${y(v)}`).join(' ')} fill="none" className="spark-line" />
-            {times.map((v, i) => (
-              <circle key={i} cx={x(i)} cy={y(v)} r={3.5} className="spark-dot">
-                <title>{`${v.toFixed(1)} s`}</title>
-              </circle>
-            ))}
-          </svg>
-        </div>
-      )}
-      {degrees.length > 0 && (
-        <div className="degree-stats">
-          <p className="muted small">Scale degrees: average time to find each one.</p>
-          <div className="chips">
-            {degrees.map((label) => {
-              const stat = data.degrees[label];
-              return (
-                <span key={label} className="chip chip-static">
-                  {degreeOrdinal(label)} <b>{(stat.ewmaMs / 1000).toFixed(1)} s</b>
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      <button
-        className="ghost danger"
-        onClick={() => {
-          if (confirm('Erase all progress? This cannot be undone.')) progressStore.reset();
-        }}
-      >
-        Reset progress
-      </button>
-    </section>
   );
 }

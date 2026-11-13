@@ -182,3 +182,74 @@ export function buildScale(tonic: string, scaleId: ScaleId): Scale {
 export function scaleNoteFor(scale: Scale, pc: number): ScaleNote | undefined {
   return scale.notes.find((n) => n.pc === pc);
 }
+
+// ---------------------------------------------------------------------------
+// The five scale positions (CAGED boxes)
+//
+// Each position is a fret window placed relative to where the parent major scale's tonic sits on
+// the low E string. Minor scales use the windows of their relative major, numbered from the box
+// that has the minor root under the first finger on the low E string (the familiar "position 1"
+// of the minor pentatonic).
+
+/** Highest fret drawn in position practice; the upper boxes of some keys reach past fret 12. */
+export const POSITION_MAX_FRET = 15;
+
+export interface PositionCell {
+  string: number;
+  fret: number;
+  pc: number;
+  degree: string;
+}
+
+export interface ScalePosition {
+  /** 0..4 in playing order for this scale. */
+  index: number;
+  /** "E shape", "Em shape": the open chord the box is built around. */
+  shape: string;
+  lo: number;
+  hi: number;
+  cells: PositionCell[];
+}
+
+const BOXES = [
+  { shape: 'E', minorShape: 'Dm', lo: -1, hi: 2 },
+  { shape: 'D', minorShape: 'Cm', lo: 1, hi: 5 },
+  { shape: 'C', minorShape: 'Am', lo: 4, hi: 7 },
+  { shape: 'A', minorShape: 'Gm', lo: 6, hi: 10 },
+  { shape: 'G', minorShape: 'Em', lo: 8, hi: 12 },
+];
+
+export function isMinorScale(id: ScaleId): boolean {
+  return id === 'minor' || id === 'minorPent';
+}
+
+export function positionsOf(scale: Scale): ScalePosition[] {
+  const minor = isMinorScale(scale.type.id);
+  const tonicPc = parseNote(scale.tonic).pc;
+  const majorPc = (tonicPc + (minor ? 3 : 0)) % 12;
+  const rootFret = (majorPc - pcOf(STRING_OPEN_MIDI[0]) + 12) % 12;
+  const order = minor ? [4, 0, 1, 2, 3] : [0, 1, 2, 3, 4];
+  let previousLo = -1;
+  return order.map((boxIdx, index) => {
+    const box = BOXES[boxIdx];
+    let lo = rootFret + box.lo;
+    let hi = rootFret + box.hi;
+    // Use the octave that fits the board, preferring to keep moving up the neck from box to box.
+    const fits = [-12, 0, 12].filter((k) => lo + k >= 0 && hi + k <= POSITION_MAX_FRET);
+    const shift = fits.find((k) => lo + k > previousLo) ?? fits[0] ?? 0;
+    lo += shift;
+    hi += shift;
+    previousLo = lo;
+    const cells: PositionCell[] = [];
+    for (let string = 0; string < STRING_COUNT; string++) {
+      for (let fret = Math.max(0, lo); fret <= hi; fret++) {
+        const pc = pcOf(fretMidi(string, fret));
+        const note = scaleNoteFor(scale, pc);
+        if (note) cells.push({ string, fret, pc, degree: note.degree });
+      }
+    }
+    // Report the frets the box actually uses (a pentatonic box is narrower than its parent scale's).
+    const used = cells.map((c) => c.fret);
+    return { index, shape: `${minor ? box.minorShape : box.shape} shape`, lo: Math.min(...used), hi: Math.max(...used), cells };
+  });
+}

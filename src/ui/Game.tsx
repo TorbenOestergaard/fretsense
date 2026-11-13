@@ -1,9 +1,9 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { mic } from '../audio/mic';
-import { itemKey, progressStore, type MasteryLevel, type Mode } from '../game/progress';
-import { Scheduler, enabledStrings } from '../game/scheduler';
+import { progressStore, type MasteryLevel, type Mode } from '../game/progress';
+import { Scheduler } from '../game/scheduler';
 import { REVEAL_AFTER_MS, Session, type AnswerResult } from '../game/session';
-import { STRING_NAMES, STRING_NUMBERS, fretMidi, midiName, pcName, pcOf, scaleNoteFor } from '../music/theory';
+import { POSITION_MAX_FRET, STRING_NAMES, STRING_NUMBERS, midiName, pcName, pcOf, type ScalePosition } from '../music/theory';
 import { Fretboard, type CellStyle } from './Fretboard';
 import { levelToUnit, useFrame, useMicState } from './hooks';
 
@@ -13,7 +13,7 @@ export interface RoundSummary {
   results: AnswerResult[];
   xp: number;
   bestCombo: number;
-  changes: { string: number; pc: number; before: MasteryLevel; after: MasteryLevel }[];
+  changes: { key: string; label: string; before: MasteryLevel; after: MasteryLevel }[];
 }
 
 interface Props {
@@ -22,7 +22,11 @@ interface Props {
 }
 
 const ordinal = (n: number) => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
-const fretText = (frets: number[]) => frets.map((f) => (f === 0 ? 'open' : `fret ${f}`)).join(' or ');
+const fretName = (f: number) => (f === 0 ? 'open' : `fret ${f}`);
+const whereText = (cells: { string: number; fret: number }[], withString: boolean) =>
+  cells.map((c) => (withString ? `${STRING_NAMES[c.string]} string ${fretName(c.fret)}` : fretName(c.fret))).join(withString ? ', ' : ' or ');
+export const positionTitle = (p: ScalePosition) => `Position ${p.index + 1}`;
+export const positionFrets = (p: ScalePosition) => (p.lo === 0 ? `open to fret ${p.hi}` : `frets ${p.lo}–${p.hi}`);
 
 export function Game({ onDone, onQuit }: Props) {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
@@ -31,22 +35,20 @@ export function Game({ onDone, onQuit }: Props) {
 
   const [session] = useState(() => {
     const settings = progressStore.get().settings;
-    const scheduler = new Scheduler(settings, (key) => progressStore.get().items[key]);
-    const strings = enabledStrings(settings).length;
-    const total = settings.mode === 'sweep' ? Math.max(1, Math.round(settings.length / strings)) * strings : settings.length;
+    const scheduler = new Scheduler(settings, (key) => progressStore.get().stats[settings.mode][key]);
     const onResult = (result: AnswerResult) => {
       const q = result.question;
       const outcome = progressStore.record(
-        { string: q.string, pc: q.pc, degree: q.degree, firstTry: result.firstTry, ms: result.ms, combo: result.combo },
+        { mode: q.mode, key: q.key, pc: q.pc, string: result.string, fret: result.fret, firstTry: result.firstTry, ms: result.ms, combo: result.combo },
         Date.now(),
       );
       totals.current.xp += outcome.xp;
       totals.current.lastXp = outcome.xp;
-      const existing = totals.current.changes.find((c) => c.string === q.string && c.pc === q.pc);
+      const existing = totals.current.changes.find((c) => c.key === q.key);
       if (existing) existing.after = outcome.after;
-      else totals.current.changes.push({ string: q.string, pc: q.pc, before: outcome.before, after: outcome.after });
+      else totals.current.changes.push({ key: q.key, label: q.label, before: outcome.before, after: outcome.after });
     };
-    return { run: new Session(scheduler, total, performance.now(), onResult), scheduler, mode: settings.mode };
+    return { run: new Session(scheduler, scheduler.roundLength(), performance.now(), onResult), scheduler, mode: settings.mode, help: settings.positionHelp };
   });
   const run = session.run;
   const scale = session.scheduler.scale;
@@ -104,30 +106,43 @@ export function Game({ onDone, onQuit }: Props) {
   if (finished) return null;
 
   const q = run.question;
+  const position = q.position;
+  const intro = run.phase === 'intro';
   const showAnswer = run.phase === 'revealed' || run.phase === 'feedback';
   const shortName = scale ? q.noteName : pcName(q.pc, 'sharp');
+  const ok = run.phase === 'feedback' && !!run.lastResult?.firstTry;
+  const answerStyle = (label: string): CellStyle => ({
+    shape: 'dot',
+    fill: ok ? '#4fb477' : '#f2c94c',
+    text: ok ? '#04170b' : '#2b2305',
+    label,
+  });
+  const quiet = (label: string | undefined, root: boolean): CellStyle => ({
+    shape: 'dot',
+    fill: '#2b303b',
+    text: '#aeb5c4',
+    label,
+    stroke: root ? '#8a93a6' : undefined,
+    opacity: 0.95,
+  });
 
   const cell = (s: number, f: number): CellStyle | null => {
-    if (!showAnswer || s !== q.string) return null;
-    const pc = pcOf(fretMidi(s, f));
-    if (pc === q.pc) {
-      const ok = run.phase === 'feedback' && run.lastResult?.firstTry;
-      return { shape: 'dot', fill: ok ? '#4fb477' : '#f2c94c', text: ok ? '#04170b' : '#2b2305', label: shortName };
+    if (position) {
+      const here = position.cells.find((c) => c.string === s && c.fret === f);
+      if (!here) return null;
+      const root = here.degree === '1';
+      if (showAnswer) return here.degree === q.degree ? answerStyle(here.degree) : quiet(here.degree, root);
+      if (intro) return root ? { shape: 'dot', fill: '#f2c94c', text: '#2b2305', label: '1' } : null;
+      if (session.help === 'shape') return quiet(root ? '1' : undefined, root);
+      if (session.help === 'roots') return root ? quiet('1', true) : null;
+      return null;
     }
-    const note = scale ? scaleNoteFor(scale, pc) : undefined;
-    if (!note) return null;
-    return {
-      shape: 'dot',
-      fill: '#2b303b',
-      text: '#aeb5c4',
-      label: note.degree,
-      stroke: note.degree === '1' ? '#8a93a6' : undefined,
-      opacity: 0.95,
-    };
+    if (!showAnswer || !q.cells.some((c) => c.string === s && c.fret === f)) return null;
+    return answerStyle(shortName);
   };
 
   let lead: string;
-  if (session.mode === 'degrees') lead = `In ${q.context}, play the`;
+  if (position) lead = `${q.context} · ${positionTitle(position).toLowerCase()} of 5 (${position.shape}) · ${positionFrets(position)}`;
   else if (session.mode === 'sweep') lead = `Every ${q.noteName}, low to high. Play`;
   else lead = 'Play';
 
@@ -151,15 +166,28 @@ export function Game({ onDone, onQuit }: Props) {
 
       <section className={`prompt prompt-${run.phase}${run.lastResult?.firstTry && run.phase === 'feedback' ? ' prompt-ok' : ''}`}>
         <p className="prompt-lead">{lead}</p>
-        <p className="prompt-note" key={run.index}>
-          {q.prompt}
+        <p className={intro ? 'prompt-note prompt-note-intro' : 'prompt-note'} key={`${run.index}${intro ? 'i' : ''}`}>
+          {intro && position ? positionTitle(position) : q.prompt}
         </p>
         <p className="prompt-string">
-          on the <strong>{q.stringName}</strong> string <span className="muted">({ordinal(STRING_NUMBERS[q.string])} string)</span>
+          {position ? (
+            intro ? (
+              <>
+                Play the <strong>root</strong> inside the box to begin
+              </>
+            ) : (
+              <>anywhere in the box</>
+            )
+          ) : (
+            <>
+              on the <strong>{q.stringName}</strong> string{' '}
+              <span className="muted">({ordinal(STRING_NUMBERS[q.string ?? 0])} string)</span>
+            </>
+          )}
         </p>
         <div className="countdown" aria-hidden="true">
           <div
-            key={run.index}
+            key={`${run.index}${intro ? 'i' : ''}`}
             style={{ animationDuration: `${REVEAL_AFTER_MS}ms`, animationPlayState: run.phase === 'asking' ? 'running' : 'paused' }}
           />
         </div>
@@ -170,8 +198,10 @@ export function Game({ onDone, onQuit }: Props) {
 
       <section className="panel board-panel">
         <Fretboard
-          label={`Fretboard, ${q.stringName} string highlighted`}
+          label={position ? `Fretboard, ${positionFrets(position)} highlighted` : `Fretboard, ${q.stringName} string highlighted`}
           highlightString={q.string}
+          maxFret={position ? POSITION_MAX_FRET : undefined}
+          band={position ? { lo: position.lo, hi: position.hi } : null}
           cell={cell}
           onCellClick={(s, f) => {
             run.click(s, f, performance.now());
@@ -191,7 +221,7 @@ export function Game({ onDone, onQuit }: Props) {
             .
           </span>
         )}
-        <span className="muted small">Space shows the answer · Esc quits</span>
+        <span className="muted small">{intro ? 'Space starts without playing the root' : 'Space shows the answer'} · Esc quits</span>
       </footer>
     </main>
   );
@@ -199,29 +229,33 @@ export function Game({ onDone, onQuit }: Props) {
 
 function Feedback({ run, xp, shortName }: { run: Session; xp: number; shortName: string }) {
   const q = run.question;
-  const where = fretText(q.frets);
+  const inBox = !!q.position;
+  const where = whereText(q.cells, inBox);
   const degreeNote = q.context ? `The ${q.prompt} of ${q.context} is ${q.noteName}. ` : '';
+  if (run.phase === 'intro') {
+    return <span className="muted">Not timed. The roots are marked on the board.</span>;
+  }
   if (run.phase === 'feedback' && run.lastResult) {
     const r = run.lastResult;
     if (r.firstTry) {
       return (
         <span className="good">
-          {q.context ? `${q.noteName}, ` : ''}
-          {where} · {(r.ms / 1000).toFixed(1)} s · +{xp} XP
+          {inBox ? `${q.noteName}` : where} · {(r.ms / 1000).toFixed(1)} s · +{xp} XP
         </span>
       );
     }
     return (
       <span>
         {degreeNote}
-        {shortName} on the {q.stringName} string is {where}.
+        {inBox ? `In this box: ${where}.` : `${shortName} on the ${q.stringName} string is ${where}.`}
       </span>
     );
   }
   if (run.phase === 'revealed') {
     return (
       <span>
-        {degreeNote}It is {where}. Play it to continue.
+        {degreeNote}
+        {inBox ? 'It is marked on the board.' : `It is ${where}.`} Play it to continue.
       </span>
     );
   }
@@ -231,7 +265,9 @@ function Feedback({ run, xp, shortName }: { run: Session; xp: number; shortName:
   if (hint.kind === 'octave') {
     return (
       <span className="warn-text">
-        That is {pcName(pcOf(hint.midi), 'sharp')}, but in a different octave than the {q.stringName} string has it. Check which string you are on.
+        {inBox
+          ? `That is ${q.noteName}, but outside this box. Stay in ${positionFrets(q.position!)}.`
+          : `That is ${pcName(pcOf(hint.midi), 'sharp')}, but in a different octave than the ${q.stringName} string has it. Check which string you are on.`}
       </span>
     );
   }
@@ -251,12 +287,4 @@ function Hearing() {
       </div>
     </div>
   );
-}
-
-export function describeItem(string: number, pc: number): string {
-  return `${pcName(pc, 'sharp')} on the ${STRING_NAMES[string]} string`;
-}
-
-export function itemKeyOf(r: AnswerResult): string {
-  return itemKey(r.question.string, r.question.pc);
 }

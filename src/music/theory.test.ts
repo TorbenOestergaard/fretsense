@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SCALES, SCALE_IDS, buildScale, fretsFor, freqToMidi, midiName, midiToFreq, pcName, targetMidis } from './theory';
+import { POSITION_MAX_FRET, SCALES, SCALE_IDS, buildScale, fretsFor, freqToMidi, midiName, midiToFreq, pcName, positionsOf, targetMidis } from './theory';
 
 describe('fretboard', () => {
   it('places notes on the right frets', () => {
@@ -56,6 +56,45 @@ describe('scales', () => {
     for (const id of SCALE_IDS) {
       for (const tonic of SCALES[id].tonics) {
         for (const note of buildScale(tonic, id).notes) expect(note.name.length, `${tonic} ${id}`).toBeLessThanOrEqual(2);
+      }
+    }
+  });
+});
+
+describe('scale positions', () => {
+  const frets = (tonic: string, id: Parameters<typeof buildScale>[1]) => positionsOf(buildScale(tonic, id)).map((p) => [p.lo, p.hi]);
+
+  it('places the five major boxes where guitarists expect them', () => {
+    expect(frets('G', 'major')).toEqual([[2, 5], [4, 8], [7, 10], [9, 13], [11, 15]]);
+    expect(positionsOf(buildScale('G', 'major')).map((p) => p.shape)).toEqual(['E shape', 'D shape', 'C shape', 'A shape', 'G shape']);
+  });
+
+  it('numbers minor boxes from the one with the root on the low E string', () => {
+    expect(frets('A', 'minorPent')).toEqual([[5, 8], [7, 10], [9, 13], [12, 15], [2, 5]]);
+    const first = positionsOf(buildScale('A', 'minorPent'))[0];
+    // The familiar A minor pentatonic box: two notes per string between frets 5 and 8.
+    expect(first.cells.map((c) => `${c.string}:${c.fret}`)).toEqual(['0:5', '0:8', '1:5', '1:7', '2:5', '2:7', '3:5', '3:7', '4:5', '4:8', '5:5', '5:8']);
+    expect(first.cells.filter((c) => c.degree === '1').map((c) => `${c.string}:${c.fret}`)).toEqual(['0:5', '2:7', '5:5']);
+  });
+
+  it('spells out the E-shape box of G major', () => {
+    const box = positionsOf(buildScale('G', 'major'))[0];
+    const perString = [0, 1, 2, 3, 4, 5].map((s) => box.cells.filter((c) => c.string === s).map((c) => c.fret));
+    expect(perString).toEqual([[2, 3, 5], [2, 3, 5], [2, 4, 5], [2, 4, 5], [3, 5], [2, 3, 5]]);
+  });
+
+  it('keeps every box on the board and complete, in every key and scale', () => {
+    for (const id of SCALE_IDS) {
+      for (const tonic of SCALES[id].tonics) {
+        const scale = buildScale(tonic, id);
+        for (const box of positionsOf(scale)) {
+          expect(box.lo, `${tonic} ${id}`).toBeGreaterThanOrEqual(0);
+          expect(box.hi, `${tonic} ${id}`).toBeLessThanOrEqual(POSITION_MAX_FRET);
+          expect(new Set(box.cells.map((c) => c.degree)).size, `${tonic} ${id} box ${box.index}`).toBe(scale.notes.length);
+          // No pitch occurs twice in a box, so a played pitch identifies one place.
+          const pitches = box.cells.map((c) => [40, 45, 50, 55, 59, 64][c.string] + c.fret);
+          expect(new Set(pitches).size, `${tonic} ${id} box ${box.index}`).toBe(pitches.length);
+        }
       }
     }
   });

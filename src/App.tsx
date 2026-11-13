@@ -4,9 +4,10 @@ import { progressStore } from './game/progress';
 import { Game, type RoundSummary } from './ui/Game';
 import { Home } from './ui/Home';
 import { MicCheck } from './ui/MicCheck';
+import { Progress } from './ui/Progress';
 import { Summary } from './ui/Summary';
 
-type View = { name: 'home' } | { name: 'mic' } | { name: 'game'; id: number } | { name: 'summary'; summary: RoundSummary };
+type View = { name: 'home' } | { name: 'mic' } | { name: 'progress' } | { name: 'game'; id: number } | { name: 'summary'; summary: RoundSummary };
 
 export function App() {
   const [view, setView] = useState<View>({ name: 'home' });
@@ -25,7 +26,9 @@ export function App() {
 
   switch (view.name) {
     case 'home':
-      return <Home onStart={() => void start()} onMic={() => setView({ name: 'mic' })} />;
+      return <Home onStart={() => void start()} onMic={() => setView({ name: 'mic' })} onProgress={() => setView({ name: 'progress' })} />;
+    case 'progress':
+      return <Progress onBack={home} />;
     case 'mic':
       return <MicCheck onBack={home} />;
     case 'game':

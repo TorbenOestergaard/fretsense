@@ -9,12 +9,15 @@ import {
   levelInfo,
   levelOf,
   masterySummary,
+  migrateV1,
+  positionKey,
   streakOf,
   xpFor,
   type ItemStat,
   type ProgressData,
   type Settings,
 } from './progress';
+import { bucketOf, dailySeries, eventsFor, groupBy } from './analytics';
 import { Scheduler, itemWeight } from './scheduler';
 import { FEEDBACK_MISS_MS, FEEDBACK_OK_MS, REVEAL_AFTER_MS, Session } from './session';
 
@@ -31,41 +34,103 @@ const settings = (patch: Partial<Settings> = {}): Settings => ({ ...DEFAULT_SETT
 
 function answerMany(data: ProgressData, string: number, pc: number, times: number, ms: number, firstTry = true) {
   let next = data;
-  for (let i = 0; i < times; i++) next = applyAnswer(next, { string, pc, firstTry, ms, combo: 0 }, NOW).data;
+  for (let i = 0; i < times; i++) next = applyAnswer(next, { mode: 'notes', key: itemKey(string, pc), string, pc, firstTry, ms, combo: 0 }, NOW).data;
   return next;
 }
 
+const noteLevel = (data: ProgressData, string: number, pc: number) => levelOf(data.stats.notes[itemKey(string, pc)]);
+
 describe('mastery', () => {
-  it('rises with fast correct answers and needs repetition to reach "instant"', () => {
+  it('needs several fast answers to climb: one lucky hit is not "instant"', () => {
     let data = emptyProgress();
-    expect(levelOf(data.items[itemKey(3, 0)])).toBe(0);
-    data = answerMany(data, 3, 0, 1, 1500);
-    expect(levelOf(data.items[itemKey(3, 0)])).toBe(3);
-    data = answerMany(data, 3, 0, 2, 1500);
-    expect(levelOf(data.items[itemKey(3, 0)])).toBe(4);
+    expect(noteLevel(data, 3, 0)).toBe(0);
+    const levels: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      data = answerMany(data, 3, 0, 1, 1500);
+      levels.push(noteLevel(data, 3, 0));
+    }
+    expect(levels).toEqual([1, 2, 3, 4]);
   });
 
   it('treats slow answers as not yet known', () => {
     const data = answerMany(emptyProgress(), 3, 0, 5, 6500);
-    expect(levelOf(data.items[itemKey(3, 0)])).toBe(1);
+    expect(noteLevel(data, 3, 0)).toBe(1);
   });
 
-  it('drops after misses and recovers gradually', () => {
-    let data = answerMany(emptyProgress(), 2, 5, 5, 1500);
-    data = answerMany(data, 2, 5, 2, 0, false);
-    expect(levelOf(data.items[itemKey(2, 5)])).toBeLessThan(3);
-    data = answerMany(data, 2, 5, 6, 1500);
-    expect(levelOf(data.items[itemKey(2, 5)])).toBe(4);
+  it('is damped downward too: one slip or one slow answer does not undo a known note', () => {
+    const known = answerMany(emptyProgress(), 2, 5, 8, 1500);
+    expect(noteLevel(answerMany(known, 2, 5, 1, 0, false), 2, 5)).toBe(4);
+    expect(noteLevel(answerMany(known, 2, 5, 1, 7000), 2, 5)).toBe(4);
+    const twoMisses = answerMany(known, 2, 5, 2, 0, false);
+    expect(noteLevel(twoMisses, 2, 5)).toBe(3);
+    expect(noteLevel(answerMany(twoMisses, 2, 5, 2, 0, false), 2, 5)).toBe(2);
+    expect(noteLevel(answerMany(twoMisses, 2, 5, 7, 1500), 2, 5)).toBe(4);
+  });
+
+  it('keeps each exercise in its own statistics', () => {
+    let data = answerMany(emptyProgress(), 3, 0, 8, 1500);
+    for (let i = 0; i < 4; i++) {
+      data = applyAnswer(data, { mode: 'sweep', key: itemKey(3, 0), string: 3, pc: 0, firstTry: false, ms: 9000, combo: 0 }, NOW).data;
+      data = applyAnswer(data, { mode: 'positions', key: positionKey('major', 1, '5'), pc: 7, firstTry: false, ms: 9000, combo: 0 }, NOW).data;
+    }
+    expect(noteLevel(data, 3, 0)).toBe(4);
+    expect(levelOf(data.stats.sweep[itemKey(3, 0)])).toBe(1);
+    expect(levelOf(data.stats.positions[positionKey('major', 1, '5')])).toBe(1);
+    expect(masterySummary(data, 'notes').solid).toBe(1);
+    expect(masterySummary(data, 'sweep').solid).toBe(0);
   });
 
   it('summarises the neck per string', () => {
     let data = emptyProgress();
-    for (let pc = 0; pc < 12; pc++) data = answerMany(data, 0, pc, 3, 1500);
+    for (let pc = 0; pc < 12; pc++) data = answerMany(data, 0, pc, 4, 1500);
     const summary = masterySummary(data);
     expect(summary.solid).toBe(12);
     expect(summary.perString[0].solid).toBe(12);
     expect(summary.perString[3].solid).toBe(0);
     expect(summary.counts[0]).toBe(60);
+  });
+
+  it('carries version 1 progress over as the Note finder starting point', () => {
+    const data = migrateV1({
+      items: { '0:0': { seen: 12, correct: 12, ewmaMs: 1800, acc: 1, last: NOW }, '3:0': { seen: 2, correct: 1, ewmaMs: 6000, acc: 0.5, last: NOW } },
+      xp: 420,
+      days: { '2026-11-13': { answers: 14, correct: 13, xp: 420 } },
+      sessions: [{ t: NOW, mode: 'degrees', n: 10, correct: 5, avgMs: 5000, xp: 100 }],
+      settings: { mode: 'degrees', naturalsOnly: false },
+    });
+    expect(noteLevel(data, 0, 0)).toBe(4);
+    expect(noteLevel(data, 3, 0)).toBe(1);
+    expect(data.xp).toBe(420);
+    expect(data.sessions).toHaveLength(0);
+    expect(data.settings.mode).toBe('positions');
+    expect(data.settings.naturalsOnly).toBe(false);
+  });
+});
+
+describe('analytics', () => {
+  it('derives averages per string, fret and day from the answer log', () => {
+    let data = emptyProgress();
+    const add = (mode: 'notes' | 'sweep', string: number, pc: number, fret: number, ms: number, firstTry: boolean, t: number) => {
+      data = applyAnswer(data, { mode, key: itemKey(string, pc), string, fret, pc, firstTry, ms, combo: 0 }, t).data;
+    };
+    const DAY = 24 * 3600 * 1000;
+    add('notes', 3, 0, 5, 4000, true, NOW - DAY);
+    add('notes', 3, 0, 5, 2000, true, NOW);
+    add('notes', 3, 1, 6, 3000, false, NOW);
+    add('notes', 4, 0, 1, 1000, true, NOW);
+    add('sweep', 4, 0, 1, 500, true, NOW);
+
+    const notes = eventsFor(data.events, 'notes');
+    expect(notes).toHaveLength(4);
+    expect(bucketOf(notes)).toEqual({ n: 4, ok: 3, avgMs: 7000 / 3 });
+    expect(groupBy(notes, (e) => e.s).get(3)).toEqual({ n: 3, ok: 2, avgMs: 3000 });
+    expect(groupBy(notes, (e) => e.f).get(1)?.avgMs).toBe(1000);
+    expect(eventsFor(data.events, 'notes', 'accidentals')).toHaveLength(1);
+    expect(eventsFor(data.events, 'notes', 'naturals')).toHaveLength(3);
+
+    const days = dailySeries(notes);
+    expect(days.map((d) => d.avgMs)).toEqual([4000, 1500]);
+    expect(days[1].n).toBe(3);
   });
 });
 
@@ -95,15 +160,15 @@ describe('xp and streaks', () => {
 
 describe('scheduler', () => {
   it('asks weak notes far more often than mastered ones', () => {
-    const strong: ItemStat = { seen: 10, correct: 10, ewmaMs: 1500, acc: 1, last: NOW };
-    const weak: ItemStat = { seen: 10, correct: 4, ewmaMs: 6000, acc: 0.4, last: NOW };
+    const strong: ItemStat = { seen: 10, correct: 10, recent: new Array(8).fill(1), ms: 1500, last: NOW };
+    const weak: ItemStat = { seen: 10, correct: 4, recent: [0, 0.3, 0, 0.3, 0, 0, 0.3, 0.3], ms: 6000, last: NOW };
     expect(itemWeight(weak, NOW)).toBeGreaterThan(itemWeight(strong, NOW) * 8);
 
     // The player knows the two low strings cold, and nothing else.
     const stats = (key: string) => (key.startsWith('0:') || key.startsWith('1:') ? strong : undefined);
     const scheduler = new Scheduler(settings({ naturalsOnly: false }), stats, seededRng(), () => NOW);
     let lowStrings = 0;
-    for (let i = 0; i < 600; i++) if (scheduler.next().string <= 1) lowStrings++;
+    for (let i = 0; i < 600; i++) if (scheduler.next().string! <= 1) lowStrings++;
     expect(lowStrings / 600).toBeLessThan(0.08);
     expect(lowStrings).toBeGreaterThan(0);
   });
@@ -113,8 +178,8 @@ describe('scheduler', () => {
     const asked: string[] = [];
     for (let i = 0; i < 200; i++) {
       const q = scheduler.next();
-      expect(asked.slice(-3)).not.toContain(itemKey(q.string, q.pc));
-      asked.push(itemKey(q.string, q.pc));
+      expect(asked.slice(-3)).not.toContain(q.key);
+      asked.push(q.key);
     }
   });
 
@@ -132,23 +197,45 @@ describe('scheduler', () => {
     const missed = scheduler.next();
     scheduler.requeue(missed);
     const following = [scheduler.next(), scheduler.next(), scheduler.next(), scheduler.next()];
-    const keys = following.map((q) => itemKey(q.string, q.pc));
-    expect(keys.slice(0, 3)).not.toContain(itemKey(missed.string, missed.pc));
-    expect(keys[3]).toBe(itemKey(missed.string, missed.pc));
+    const keys = following.map((q) => q.key);
+    expect(keys.slice(0, 3)).not.toContain(missed.key);
+    expect(keys[3]).toBe(missed.key);
   });
 
-  it('asks for scale degrees in the chosen key', () => {
-    const scheduler = new Scheduler(settings({ mode: 'degrees', tonic: 'G', scaleId: 'major' }), () => undefined, seededRng(), () => NOW);
-    const seen = new Map<string, string>();
-    for (let i = 0; i < 200; i++) {
-      const q = scheduler.next();
-      expect(q.context).toBe('G major');
-      seen.set(q.prompt, q.noteName);
+  it('walks the scale positions one box at a time, every degree once in random order', () => {
+    const scheduler = new Scheduler(settings({ mode: 'positions', tonic: 'G', scaleId: 'major' }), () => undefined, seededRng(), () => NOW);
+    expect(scheduler.roundLength()).toBe(35);
+    const asked = Array.from({ length: 35 }, () => scheduler.next());
+    expect(asked.map((q) => q.position!.index)).toEqual([0, 1, 2, 3, 4].flatMap((p) => new Array(7).fill(p)));
+    for (let p = 0; p < 5; p++) {
+      const box = asked.slice(p * 7, p * 7 + 7);
+      expect(box.map((q) => q.degree).sort()).toEqual(['1', '2', '3', '4', '5', '6', '7']);
+      expect(box.every((q) => q.context === 'G major' && q.string === null)).toBe(true);
     }
-    expect(seen.get('root')).toBe('G');
-    expect(seen.get('3rd')).toBe('B');
-    expect(seen.get('7th')).toBe('F♯');
-    expect(seen.size).toBe(7);
+    expect(asked.slice(0, 7).map((q) => q.degree)).not.toEqual(['1', '2', '3', '4', '5', '6', '7']);
+    const third = asked.find((q) => q.position!.index === 0 && q.degree === '3')!;
+    expect(third.noteName).toBe('B');
+    expect(third.prompt).toBe('3rd');
+    // B inside frets 2-5: A string fret 2 and G string fret 4.
+    expect(third.cells).toEqual([{ string: 1, fret: 2 }, { string: 3, fret: 4 }]);
+    expect(third.key).toBe(positionKey('major', 0, '3'));
+  });
+
+  it('practises only the chosen positions and repeats a missed degree before leaving the box', () => {
+    const scheduler = new Scheduler(
+      settings({ mode: 'positions', tonic: 'A', scaleId: 'minorPent', positions: [true, true, false, false, false] }),
+      () => undefined,
+      seededRng(5),
+      () => NOW,
+    );
+    expect(scheduler.roundLength()).toBe(10);
+    const first = scheduler.next();
+    expect(scheduler.requeue(first)).toBe(true);
+    expect(scheduler.requeue(first)).toBe(false);
+    const rest = Array.from({ length: 10 }, () => scheduler.next());
+    expect(rest.slice(0, 5).every((q) => q.position!.index === 0)).toBe(true);
+    expect(rest[4].key).toBe(first.key);
+    expect(rest.slice(5).every((q) => q.position!.index === 1)).toBe(true);
   });
 
   it('sweeps one note across the strings from low to high', () => {
@@ -224,7 +311,7 @@ describe('session', () => {
     expect(s.phase).toBe('feedback');
     s.skip(1000);
     expect(s.phase).toBe('asking');
-    s.click(s.question.string, s.question.frets[0], 3000);
+    s.click(s.question.cells[0].string, s.question.cells[0].fret, 3000);
     expect(s.lastResult?.firstTry).toBe(true);
   });
 
@@ -237,5 +324,56 @@ describe('session', () => {
     expect(s.phase).toBe('done');
     expect(s.results).toHaveLength(2);
     expect(s.bestCombo).toBe(2);
+  });
+
+  it('starts each scale box with an untimed step: play the root', () => {
+    const scheduler = new Scheduler(
+      settings({ mode: 'positions', tonic: 'G', scaleId: 'majorPent', positions: [true, true, false, false, false] }),
+      () => undefined,
+      seededRng(2),
+      () => NOW,
+    );
+    const s = new Session(scheduler, scheduler.roundLength(), 0);
+    expect(s.phase).toBe('intro');
+    s.tick(60000);
+    expect(s.phase).toBe('intro'); // no time limit
+    s.noteOn(45, 61000); // A2 is in the box but is not the root
+    expect(s.phase).toBe('intro');
+    s.noteOn(43, 62000); // G2, low E string fret 3
+    expect(s.phase).toBe('asking');
+    expect(s.askedAt).toBe(62000);
+
+    let t = 62000;
+    for (let i = 0; i < 5; i++) {
+      t += 2000;
+      s.noteOn(s.question.targets[0], t);
+      expect(s.lastResult).toMatchObject({ firstTry: true, ms: 2000 });
+      t += FEEDBACK_OK_MS;
+      s.tick(t);
+    }
+    expect(s.phase).toBe('intro'); // second box
+    expect(s.question.position!.index).toBe(1);
+    s.skip(t);
+    expect(s.phase).toBe('asking');
+  });
+
+  it('accepts a degree anywhere in the box, nudges outside it, and extends the round after a miss', () => {
+    const scheduler = new Scheduler(
+      settings({ mode: 'positions', tonic: 'G', scaleId: 'major', positions: [true, false, false, false, false] }),
+      () => undefined,
+      seededRng(2),
+      () => NOW,
+    );
+    const s = new Session(scheduler, scheduler.roundLength(), 0);
+    s.skip(0);
+    const q = s.question;
+    expect(q.targets.length).toBeGreaterThanOrEqual(1);
+    s.noteHeld(Math.max(...q.targets) + 12, 1000);
+    expect(s.hint?.kind).toBe('octave');
+    s.noteHeld(q.targets[0] + 1, 1500);
+    expect(s.hint?.kind).toBe('wrong');
+    s.noteOn(q.targets[q.targets.length - 1], 2500);
+    expect(s.lastResult).toMatchObject({ firstTry: false, mistakes: 1 });
+    expect(s.total).toBe(8);
   });
 });

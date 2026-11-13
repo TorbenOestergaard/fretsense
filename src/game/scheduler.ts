@@ -2,33 +2,43 @@ import {
   STRING_COUNT,
   STRING_NAMES,
   buildScale,
+  fretMidi,
   fretsFor,
   isNatural,
   pcName,
+  positionsOf,
   targetMidis,
   type Scale,
+  type ScalePosition,
 } from '../music/theory';
-import { itemKey, scoreOf, type ItemStat, type Mode, type Settings } from './progress';
+import { itemKey, positionKey, scoreOf, type ItemStat, type Mode, type Settings } from './progress';
 
 export interface PoolItem {
-  string: number;
+  /** The string to play on, or null when anywhere inside a scale position counts. */
+  string: number | null;
   pc: number;
-  /** Degree label in the session's key ("3", "♭7"), for the scale-degree mode. */
+  /** Degree label in the session's key ("3", "♭7"), for scale-position practice. */
   degree?: string;
+  position?: ScalePosition;
 }
 
 export interface Question extends PoolItem {
   mode: Mode;
+  /** Key of this item in the mode's statistics. */
+  key: string;
+  /** "C on the G string", "5th in position 2". */
+  label: string;
   /** The big thing to find: "C", "F♯/G♭", or "3rd". */
   prompt: string;
-  /** Note name spelled for the key (degree mode) or plain (note modes). */
+  /** Note name spelled for the key (positions) or plain (note modes). */
   noteName: string;
-  stringName: string;
-  /** Key context for degree mode: "G major". */
+  stringName?: string;
+  /** Key context for positions: "G major". */
   context?: string;
   /** Exact MIDI pitches that are correct. */
   targets: number[];
-  frets: number[];
+  /** Every place on the board that is a correct answer. */
+  cells: { string: number; fret: number }[];
 }
 
 export type StatLookup = (key: string) => ItemStat | undefined;
@@ -50,33 +60,51 @@ export function enabledStrings(settings: Settings): number[] {
   return strings.length ? strings : [0, 1, 2, 3, 4, 5];
 }
 
-export function buildPool(settings: Settings, scale: Scale | null): PoolItem[] {
+export function enabledPositions(settings: Settings): number[] {
+  const positions = [0, 1, 2, 3, 4].filter((p) => settings.positions[p]);
+  return positions.length ? positions : [0, 1, 2, 3, 4];
+}
+
+export function buildPool(settings: Settings): PoolItem[] {
   const pool: PoolItem[] = [];
   for (const string of enabledStrings(settings)) {
-    if (settings.mode === 'degrees' && scale) {
-      for (const note of scale.notes) pool.push({ string, pc: note.pc, degree: note.degree });
-    } else {
-      for (let pc = 0; pc < 12; pc++) {
-        if (settings.naturalsOnly && !isNatural(pc)) continue;
-        pool.push({ string, pc });
-      }
+    for (let pc = 0; pc < 12; pc++) {
+      if (settings.naturalsOnly && !isNatural(pc)) continue;
+      pool.push({ string, pc });
     }
   }
   return pool;
 }
 
 export function toQuestion(item: PoolItem, mode: Mode, scale: Scale | null): Question {
-  const scaleNote = item.degree && scale ? scale.notes.find((n) => n.degree === item.degree) : undefined;
-  const noteName = scaleNote ? scaleNote.name : pcName(item.pc);
+  if (item.position && item.degree && scale) {
+    const note = scale.notes.find((n) => n.degree === item.degree)!;
+    const cells = item.position.cells.filter((c) => c.degree === item.degree).map(({ string, fret }) => ({ string, fret }));
+    return {
+      ...item,
+      mode,
+      key: positionKey(scale.type.id, item.position.index, item.degree),
+      label: `${note.ordinal} in position ${item.position.index + 1}`,
+      prompt: note.ordinal,
+      noteName: note.name,
+      context: scale.name,
+      targets: [...new Set(cells.map((c) => fretMidi(c.string, c.fret)))],
+      cells,
+    };
+  }
+  const string = item.string ?? 0;
+  const noteName = pcName(item.pc);
   return {
     ...item,
+    string,
     mode,
-    prompt: scaleNote ? scaleNote.ordinal : noteName,
+    key: itemKey(string, item.pc),
+    label: `${pcName(item.pc, 'sharp')} on the ${STRING_NAMES[string]} string`,
+    prompt: noteName,
     noteName,
-    stringName: STRING_NAMES[item.string],
-    context: scaleNote && scale ? scale.name : undefined,
-    targets: targetMidis(item.string, item.pc),
-    frets: fretsFor(item.string, item.pc),
+    stringName: STRING_NAMES[string],
+    targets: targetMidis(string, item.pc),
+    cells: fretsFor(string, item.pc).map((fret) => ({ string, fret })),
   };
 }
 
@@ -95,17 +123,21 @@ const RETRY_GAP = 3;
 
 /**
  * Picks what to ask next.
- * - Weak, slow, new and stale items come up more often (adaptive, like spaced repetition).
- * - An item you missed comes back a few questions later, while the correction is still fresh.
- * - Sweep mode walks one note across the strings, low to high (the classic "find every C" drill).
+ * - Note finder: weak, slow, new and stale items come up more often (adaptive, like spaced
+ *   repetition), and an item you missed comes back a few questions later.
+ * - String sweep: one note across the strings, low to high (the classic "find every C" drill).
+ * - Scale positions: one box at a time; every degree of the scale once, in random order, then
+ *   the next box. A missed degree is asked again before the box is left.
  */
 export class Scheduler {
   private recent: string[] = [];
   private retries: { item: PoolItem; due: number }[] = [];
   private asked = 0;
-  private sweepQueue: PoolItem[] = [];
+  private queue: PoolItem[] = [];
   private lastSweepPc = -1;
+  private retried = new Set<string>();
   readonly scale: Scale | null;
+  readonly positions: ScalePosition[];
   private readonly pool: PoolItem[];
 
   constructor(
@@ -114,42 +146,85 @@ export class Scheduler {
     private readonly rng: () => number = Math.random,
     private readonly now: () => number = Date.now,
   ) {
-    this.scale = settings.mode === 'degrees' ? buildScale(settings.tonic, settings.scaleId) : null;
-    this.pool = buildPool(settings, this.scale);
+    this.scale = settings.mode === 'positions' ? buildScale(settings.tonic, settings.scaleId) : null;
+    this.positions = this.scale ? positionsOf(this.scale) : [];
+    this.pool = this.scale ? [] : buildPool(settings);
+    if (this.scale) {
+      for (const p of enabledPositions(settings)) {
+        const degrees = this.scale.notes.map((n) => n.degree);
+        for (let i = degrees.length - 1; i > 0; i--) {
+          const j = Math.floor(this.rng() * (i + 1));
+          [degrees[i], degrees[j]] = [degrees[j], degrees[i]];
+        }
+        for (const degree of degrees) {
+          const pc = this.scale.notes.find((n) => n.degree === degree)!.pc;
+          this.queue.push({ string: null, pc, degree, position: this.positions[p] });
+        }
+      }
+    }
+  }
+
+  /** Number of questions in a round, before any repeats of missed degrees. */
+  roundLength(): number {
+    if (this.settings.mode === 'positions') return this.queue.length;
+    if (this.settings.mode === 'sweep') {
+      const strings = enabledStrings(this.settings).length;
+      return Math.max(1, Math.round(this.settings.length / strings)) * strings;
+    }
+    return this.settings.length;
   }
 
   next(): Question {
-    const item = this.settings.mode === 'sweep' ? this.nextSweep() : this.nextAdaptive();
+    const mode = this.settings.mode;
+    const item = mode === 'positions' ? this.queue.shift()! : mode === 'sweep' ? this.nextSweep() : this.nextAdaptive();
     this.asked++;
-    this.recent.push(itemKey(item.string, item.pc));
+    const question = toQuestion(item, mode, this.scale);
+    this.recent.push(question.key);
     if (this.recent.length > RECENT_WINDOW) this.recent.shift();
-    return toQuestion(item, this.settings.mode, this.scale);
+    return question;
   }
 
-  /** Call when the player missed an item so it returns shortly. */
-  requeue(item: PoolItem) {
-    if (this.settings.mode === 'sweep') return;
-    if (this.retries.some((r) => r.item.string === item.string && r.item.pc === item.pc)) return;
-    this.retries.push({ item: { string: item.string, pc: item.pc, degree: item.degree }, due: this.asked + RETRY_GAP });
+  /**
+   * Call when the player missed an item so it returns shortly.
+   * Returns true when that adds a question to the round.
+   */
+  requeue(item: Question): boolean {
+    if (this.settings.mode === 'sweep') return false;
+    if (this.settings.mode === 'positions') {
+      if (this.retried.has(item.key)) return false;
+      this.retried.add(item.key);
+      // Ask it again as the last question of this box.
+      let at = this.queue.findIndex((q) => q.position !== item.position);
+      if (at < 0) at = this.queue.length;
+      this.queue.splice(at, 0, { string: null, pc: item.pc, degree: item.degree, position: item.position });
+      return true;
+    }
+    if (this.retries.some((r) => r.item.string === item.string && r.item.pc === item.pc)) return false;
+    this.retries.push({ item: { string: item.string, pc: item.pc }, due: this.asked + RETRY_GAP });
+    return false;
+  }
+
+  private keyOf(item: PoolItem): string {
+    return itemKey(item.string ?? 0, item.pc);
   }
 
   private weightOf(item: PoolItem): number {
-    return itemWeight(this.getStat(itemKey(item.string, item.pc)), this.now());
+    return itemWeight(this.getStat(this.keyOf(item)), this.now());
   }
 
   private nextAdaptive(): PoolItem {
     const dueIdx = this.retries.findIndex((r) => r.due <= this.asked);
     if (dueIdx >= 0) return this.retries.splice(dueIdx, 1)[0].item;
 
-    const lastPitch = this.recent.length ? this.recent[this.recent.length - 1] : null;
-    let candidates = this.pool.filter((item) => !this.recent.includes(itemKey(item.string, item.pc)));
-    if (candidates.length === 0) candidates = this.pool.filter((item) => itemKey(item.string, item.pc) !== lastPitch);
+    const last = this.recent.length ? this.recent[this.recent.length - 1] : null;
+    let candidates = this.pool.filter((item) => !this.recent.includes(this.keyOf(item)));
+    if (candidates.length === 0) candidates = this.pool.filter((item) => this.keyOf(item) !== last);
     if (candidates.length === 0) candidates = this.pool;
     return pickWeighted(candidates, candidates.map((item) => this.weightOf(item)), this.rng);
   }
 
   private nextSweep(): PoolItem {
-    if (this.sweepQueue.length === 0) {
+    if (this.queue.length === 0) {
       const strings = enabledStrings(this.settings);
       const pcs: number[] = [];
       for (let pc = 0; pc < 12; pc++) {
@@ -159,8 +234,8 @@ export class Scheduler {
       const weights = pcs.map((pc) => strings.reduce((sum, string) => sum + this.weightOf({ string, pc }), 0));
       const pc = pickWeighted(pcs, weights, this.rng);
       this.lastSweepPc = pc;
-      this.sweepQueue = strings.map((string) => ({ string, pc }));
+      this.queue = strings.map((string) => ({ string, pc }));
     }
-    return this.sweepQueue.shift()!;
+    return this.queue.shift()!;
   }
 }

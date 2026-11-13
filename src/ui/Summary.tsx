@@ -1,7 +1,7 @@
-import { MASTERY_LABELS, levelInfo } from '../game/progress';
-import { describeItem, itemKeyOf, type RoundSummary } from './Game';
+import { MASTERY_LABELS, MODE_TITLES, levelInfo } from '../game/progress';
+import type { RoundSummary } from './Game';
 import { useProgress } from './hooks';
-import { MasteryMap } from './MasteryMap';
+import { MasteryMap, PositionGrid } from './MasteryMap';
 
 interface Props {
   summary: RoundSummary;
@@ -24,11 +24,11 @@ export function Summary({ summary, onAgain, onHome }: Props) {
   // The notes to think about before the next round: missed ones first, then the slowest.
   const worst = new Map<string, { label: string; cost: number; missed: boolean }>();
   for (const r of results) {
-    const key = itemKeyOf(r);
+    const key = r.question.key;
     const cost = r.firstTry ? r.ms : 100000 + r.ms;
     const prev = worst.get(key);
     if (!prev || cost > prev.cost) {
-      worst.set(key, { label: describeItem(r.question.string, r.question.pc), cost, missed: !r.firstTry });
+      worst.set(key, { label: r.question.label, cost, missed: !r.firstTry });
     }
   }
   const needsWork = [...worst.values()]
@@ -43,7 +43,10 @@ export function Summary({ summary, onAgain, onHome }: Props) {
           <span className="brand-mark" aria-hidden="true" />
           Round complete
         </div>
-        <span className="muted">{summary.context ?? (summary.mode === 'sweep' ? 'String sweep' : 'Note finder')}</span>
+        <span className="muted">
+          {MODE_TITLES[summary.mode]}
+          {summary.context ? ` · ${summary.context}` : ''}
+        </span>
       </header>
 
       <section className="tiles">
@@ -78,8 +81,8 @@ export function Summary({ summary, onAgain, onHome }: Props) {
             {movedUp.length === 0 && fresh === 0 && <p className="muted">Nothing changed level this round.</p>}
             <ul className="plain">
               {movedUp.map((c) => (
-                <li key={`${c.string}:${c.pc}`}>
-                  {describeItem(c.string, c.pc)}{' '}
+                <li key={c.key}>
+                  {c.label}{' '}
                   <span className="muted">
                     {MASTERY_LABELS[c.before]} → <span className="good">{MASTERY_LABELS[c.after]}</span>
                   </span>
@@ -87,7 +90,7 @@ export function Summary({ summary, onAgain, onHome }: Props) {
               ))}
               {fresh > 0 && (
                 <li className="muted">
-                  {fresh} {fresh === 1 ? 'note' : 'notes'} practised for the first time
+                  {fresh} practised for the first time in this exercise
                 </li>
               )}
             </ul>
@@ -107,7 +110,7 @@ export function Summary({ summary, onAgain, onHome }: Props) {
       )}
 
       <section className="panel">
-        <MasteryMap data={data} />
+        {summary.mode === 'positions' ? <PositionGrid data={data} scaleId={data.settings.scaleId} /> : <MasteryMap data={data} mode={summary.mode} />}
       </section>
 
       <div className="start-row">
