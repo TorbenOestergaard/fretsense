@@ -1,4 +1,4 @@
-import { DAILY_GOAL, dayKey, levelInfo, pointsOf, progressStore, streakOf, type Mode, type PositionHelp } from '../game/progress';
+import { DAILY_GOAL, dayKey, levelInfo, noteChoice, noteFlags, pointsOf, progressStore, streakOf, type Mode, type PositionHelp } from '../game/progress';
 import { enabledPositions, positionRoundSize } from '../game/scheduler';
 import { SCALES, SCALE_IDS, STRING_NAMES, buildScale, parseNote, positionsOf } from '../music/theory';
 import { positionFrets } from './Game';
@@ -8,9 +8,9 @@ import { useMicState, useProgress, useSync } from './hooks';
 import { MasteryMap, PositionGrid } from './MasteryMap';
 
 const MODES: { id: Mode; title: string; blurb: string }[] = [
+  { id: 'sweep', title: 'String sweep', blurb: 'One note on every string, low to high. The classic “find every C” drill.' },
   { id: 'notes', title: 'Note finder', blurb: '“Play C on the G string.” Random notes, weighted toward the ones you are slow on.' },
   { id: 'positions', title: 'Scale positions', blurb: '“G major, position 2: play the 5th.” Every degree of one box in random order, then the next box, round and round.' },
-  { id: 'sweep', title: 'String sweep', blurb: 'One note on every string, low to high. The classic “find every C” drill.' },
 ];
 
 const HELP: { id: PositionHelp; label: string }[] = [
@@ -47,6 +47,13 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
   const togglePosition = (p: number) => {
     const positions = settings.positions.map((on, i) => (i === p ? !on : on));
     if (positions.some(Boolean)) set({ positions });
+  };
+
+  const notes = noteChoice(settings);
+  // Like the strings: each can be switched on or off, but not both off.
+  const toggleNotes = (which: 'naturals' | 'accidentals') => {
+    const flags = noteFlags({ ...notes, [which]: !notes[which] });
+    if (flags) set(flags);
   };
 
   const toggleString = (s: number) => {
@@ -213,11 +220,11 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
               <div className="option">
                 <span className="option-label">Notes</span>
                 <div className="chips">
-                  <button className={settings.naturalsOnly ? 'chip chip-on' : 'chip'} aria-pressed={settings.naturalsOnly} onClick={() => set({ naturalsOnly: true })}>
-                    Naturals only
+                  <button className={notes.naturals ? 'chip chip-on' : 'chip'} aria-pressed={notes.naturals} onClick={() => toggleNotes('naturals')}>
+                    Naturals
                   </button>
-                  <button className={!settings.naturalsOnly ? 'chip chip-on' : 'chip'} aria-pressed={!settings.naturalsOnly} onClick={() => set({ naturalsOnly: false })}>
-                    With sharps and flats
+                  <button className={notes.accidentals ? 'chip chip-on' : 'chip'} aria-pressed={notes.accidentals} onClick={() => toggleNotes('accidentals')}>
+                    Sharps and flats
                   </button>
                 </div>
               </div>

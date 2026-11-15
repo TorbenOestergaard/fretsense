@@ -11,7 +11,7 @@ import {
   type Scale,
   type ScalePosition,
 } from '../music/theory';
-import { itemKey, positionKey, scoreOf, type ItemStat, type Mode, type Settings } from './progress';
+import { itemKey, noteChoice, positionKey, scoreOf, type ItemStat, type Mode, type Settings } from './progress';
 
 export interface PoolItem {
   /** The string to play on, or null when anywhere inside a scale position counts. */
@@ -65,15 +65,15 @@ export function enabledPositions(settings: Settings): number[] {
   return positions.length ? positions : [0, 1, 2, 3, 4];
 }
 
+/** The notes that are asked: the naturals, the sharps and flats, or all twelve. */
+export function enabledNotes(settings: Settings): number[] {
+  const { naturals, accidentals } = noteChoice(settings);
+  return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].filter((pc) => (isNatural(pc) ? naturals : accidentals));
+}
+
 export function buildPool(settings: Settings): PoolItem[] {
-  const pool: PoolItem[] = [];
-  for (const string of enabledStrings(settings)) {
-    for (let pc = 0; pc < 12; pc++) {
-      if (settings.naturalsOnly && !isNatural(pc)) continue;
-      pool.push({ string, pc });
-    }
-  }
-  return pool;
+  const notes = enabledNotes(settings);
+  return enabledStrings(settings).flatMap((string) => notes.map((pc) => ({ string, pc })));
 }
 
 export function toQuestion(item: PoolItem, mode: Mode, scale: Scale | null): Question {
@@ -259,11 +259,7 @@ export class Scheduler {
   private nextSweep(): PoolItem {
     if (this.queue.length === 0) {
       const strings = enabledStrings(this.settings);
-      const pcs: number[] = [];
-      for (let pc = 0; pc < 12; pc++) {
-        if (this.settings.naturalsOnly && !isNatural(pc)) continue;
-        if (pc !== this.lastSweepPc) pcs.push(pc);
-      }
+      const pcs = enabledNotes(this.settings).filter((pc) => pc !== this.lastSweepPc);
       const weights = pcs.map((pc) => strings.reduce((sum, string) => sum + this.weightOf({ string, pc }), 0));
       const pc = pickWeighted(pcs, weights, this.rng);
       this.lastSweepPc = pc;

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { bucketOf, dailySeries, eventsFor, groupBy, lastDays, parsePositionKey, type Bucket, type DayPoint, type NoteFilter } from '../game/analytics';
-import { DAILY_GOAL, MODES, MODE_TITLES, dayKey, levelInfo, pointsOf, practiceMs, progressStore, streakOf, type Mode, type ProgressData } from '../game/progress';
+import { DAILY_GOAL, MODE_ORDER, MODE_TITLES, dayKey, levelInfo, pointsOf, practiceMs, progressStore, streakOf, type Mode, type ProgressData } from '../game/progress';
 import { SCALES, SCALE_IDS, STRING_NAMES, degreeOrdinal, pcName, type ScaleId } from '../music/theory';
 import { importProgress, looksLikeProgress, toSyncDoc } from '../sync/merge';
 import { sync } from '../sync/sync';
@@ -112,7 +112,7 @@ export function Progress({ onBack }: { onBack: () => void }) {
 
       <section className="panel">
         <div className="tabs" role="tablist" aria-label="Exercise">
-          {MODES.map((m) => (
+          {MODE_ORDER.map((m) => (
             <button key={m} role="tab" aria-selected={mode === m} className={mode === m ? 'tab tab-on' : 'tab'} onClick={() => setMode(m)}>
               {MODE_TITLES[m]}
             </button>

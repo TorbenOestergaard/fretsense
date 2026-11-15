@@ -12,6 +12,9 @@ import {
   levelStart,
   masterySummary,
   migrateV1,
+  noteChoice,
+  noteFlags,
+  normaliseSettings,
   normaliseProgress,
   pointsOf,
   positionKey,
@@ -26,7 +29,7 @@ import {
   type Settings,
 } from './progress';
 import { bucketOf, dailySeries, eventsFor, groupBy } from './analytics';
-import { Scheduler, itemWeight } from './scheduler';
+import { Scheduler, buildPool, enabledNotes, itemWeight } from './scheduler';
 import { FEEDBACK_MISS_MS, FEEDBACK_OK_MS, REVEAL_AFTER_MS, Session } from './session';
 
 function seededRng(seed = 42) {
@@ -139,6 +142,37 @@ describe('analytics', () => {
     const days = dailySeries(notes);
     expect(days.map((d) => d.avgMs)).toEqual([4000, 1500]);
     expect(days[1].n).toBe(3);
+  });
+});
+
+describe('which notes are asked (stored setting)', () => {
+  it('reads settings stored before "sharps and flats only" existed as what they meant', () => {
+    const naturalsOnly = normaliseSettings({ mode: 'notes', naturalsOnly: true } as Partial<Settings>);
+    expect(naturalsOnly.accidentalsOnly).toBe(false);
+    expect(noteChoice(naturalsOnly)).toEqual({ naturals: true, accidentals: false });
+    const withSharps = normaliseSettings({ mode: 'notes', naturalsOnly: false } as Partial<Settings>);
+    expect(withSharps.accidentalsOnly).toBe(false);
+    expect(noteChoice(withSharps)).toEqual({ naturals: true, accidentals: true });
+    expect(noteChoice(normaliseSettings(undefined))).toEqual({ naturals: true, accidentals: false });
+    expect(noteChoice(normaliseProgress({ v: 2, settings: { naturalsOnly: false } }).settings)).toEqual({ naturals: true, accidentals: true });
+  });
+
+  it('stores the three choices so that an older build still reads a sensible one', () => {
+    expect(noteFlags({ naturals: true, accidentals: false })).toEqual({ naturalsOnly: true, accidentalsOnly: false });
+    expect(noteFlags({ naturals: true, accidentals: true })).toEqual({ naturalsOnly: false, accidentalsOnly: false });
+    // Sharps and flats only: an older build sees naturalsOnly false, "with sharps and flats".
+    expect(noteFlags({ naturals: false, accidentals: true })).toEqual({ naturalsOnly: false, accidentalsOnly: true });
+    expect(noteFlags({ naturals: false, accidentals: false })).toBeNull();
+    for (const choice of [{ naturals: true, accidentals: false }, { naturals: true, accidentals: true }, { naturals: false, accidentals: true }]) {
+      expect(noteChoice(normaliseSettings(JSON.parse(JSON.stringify({ ...DEFAULT_SETTINGS, ...noteFlags(choice) }))))).toEqual(choice);
+    }
+  });
+
+  it('follows an older build that switched back to "Naturals only" on newer settings', () => {
+    // The older build only knows naturalsOnly and leaves accidentalsOnly as it found it.
+    const fromOlderBuild = normaliseSettings({ ...DEFAULT_SETTINGS, naturalsOnly: true, accidentalsOnly: true });
+    expect(fromOlderBuild).toMatchObject({ naturalsOnly: true, accidentalsOnly: false });
+    expect(noteChoice(fromOlderBuild)).toEqual({ naturals: true, accidentals: false });
   });
 });
 
@@ -375,6 +409,29 @@ describe('scheduler', () => {
     expect(scheduler.requeue(second)).toBe(true); // a new pass may repeat a miss again
     const rest = Array.from({ length: 5 }, () => scheduler.next());
     expect(rest[4].key).toBe(second.key);
+  });
+
+  it('asks naturals, sharps and flats, or both', () => {
+    const ACCIDENTALS = [1, 3, 6, 8, 10];
+    expect(enabledNotes(settings())).toEqual([0, 2, 4, 5, 7, 9, 11]);
+    expect(enabledNotes(settings({ naturalsOnly: false }))).toHaveLength(12);
+    const sharps = settings({ naturalsOnly: false, accidentalsOnly: true, strings: [false, false, true, true, false, false] });
+    expect(enabledNotes(sharps)).toEqual(ACCIDENTALS);
+    expect(buildPool(sharps)).toHaveLength(10);
+
+    const finder = new Scheduler(sharps, () => undefined, seededRng(8), () => NOW);
+    const asked = Array.from({ length: 60 }, () => finder.next());
+    expect(asked.every((q) => ACCIDENTALS.includes(q.pc) && [2, 3].includes(q.string!))).toBe(true);
+    expect(new Set(asked.map((q) => q.key)).size).toBe(10);
+    for (let i = 1; i < asked.length; i++) expect(asked[i].key).not.toBe(asked[i - 1].key);
+
+    // The sweep keeps its length (whole runs across the strings) and never repeats a note at once.
+    const sweep = new Scheduler({ ...sharps, mode: 'sweep', strings: DEFAULT_SETTINGS.strings, length: 20 }, () => undefined, seededRng(8), () => NOW);
+    expect(sweep.roundLength()).toBe(18);
+    const runs = Array.from({ length: 12 }, () => Array.from({ length: 6 }, () => sweep.next()));
+    expect(runs.every((run) => ACCIDENTALS.includes(run[0].pc) && run.every((q) => q.pc === run[0].pc))).toBe(true);
+    for (let i = 1; i < runs.length; i++) expect(runs[i][0].pc).not.toBe(runs[i - 1][0].pc);
+    expect(new Set(runs.map((run) => run[0].pc)).size).toBe(5);
   });
 
   it('sweeps one note across the strings from low to high', () => {

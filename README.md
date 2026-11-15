@@ -25,13 +25,15 @@ There are three exercises. Each keeps its own statistics, because they are not e
 
 | Exercise | Prompt | What it builds |
 | --- | --- | --- |
+| String sweep | "Every C, low to high" | The same note across all strings (octave shapes) |
 | Note finder | "Play C on the G string" | Direct recall of each note on each string |
 | Scale positions | "G major, position 2: play the 5th" | Where every degree sits inside each of the five boxes |
-| String sweep | "Every C, low to high" | The same note across all strings (octave shapes) |
 
 **Note finder and String sweep** track *this note on this string*: 6 strings × 12 notes = 72
 items (fret 12 repeats the open string). The Note finder is adaptive: slow, missed, new and
 long-unseen notes are asked more often, and a missed note returns three questions later.
+Both ask the notes you switch on: **Naturals**, **Sharps and flats**, or both. Sharps and flats
+alone is a round of only the five accidentals on the chosen strings.
 
 **Scale positions** takes one box at a time, in a key and scale you choose (major, natural
 minor, major or minor pentatonic). A box starts with an untimed step, *play the root*, to get
@@ -85,8 +87,8 @@ Level *L* starts at 15·*L*·(*L*−1) points: level 2 at 30, level 3 at 90, lev
 four and a half months to level 10. Nothing is added up per answer: points are worked out from
 the log and the statistics each time, which is why they are the same in every synced browser.
 
-Suggested routine: 5–10 minutes a day. Start with naturals only on the D, G and B strings in the
-Note finder, switch on sharps and flats once those rows turn yellow and green, and add a Scale positions
+Suggested routine: 5–10 minutes a day. Start with naturals on the D, G and B strings in the
+Note finder, switch on sharps and flats (alone, or together with the naturals) once those rows turn yellow and green, and add a Scale positions
 round in the key you are currently playing in.
 
 ## How the listening works

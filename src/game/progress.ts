@@ -22,6 +22,8 @@ import { STRING_COUNT, type ScaleId } from '../music/theory';
 
 export type Mode = 'notes' | 'positions' | 'sweep';
 export const MODES: Mode[] = ['notes', 'positions', 'sweep'];
+/** The order in which the exercises are listed on screen. */
+export const MODE_ORDER: Mode[] = ['sweep', 'notes', 'positions'];
 export const MODE_TITLES: Record<Mode, string> = {
   notes: 'Note finder',
   positions: 'Scale positions',
@@ -81,7 +83,14 @@ export type PositionHelp = 'roots' | 'shape' | 'none';
 export interface Settings {
   mode: Mode;
   strings: boolean[];
+  /**
+   * Which notes the Note finder and the String sweep ask. Two flags for the three choices, so
+   * that a build from before "sharps and flats only" existed still reads `naturalsOnly`:
+   * naturals only = naturalsOnly; sharps and flats only = accidentalsOnly; both = neither.
+   * Read them through noteChoice(). If both are set, naturalsOnly wins.
+   */
   naturalsOnly: boolean;
+  accidentalsOnly: boolean;
   length: number;
   tonic: string;
   scaleId: ScaleId;
@@ -127,6 +136,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mode: 'notes',
   strings: new Array(STRING_COUNT).fill(true),
   naturalsOnly: true,
+  accidentalsOnly: false,
   length: 20,
   tonic: 'C',
   scaleId: 'major',
@@ -135,6 +145,18 @@ export const DEFAULT_SETTINGS: Settings = {
   sensitivity: 'normal',
   deviceId: null,
 };
+
+/** Which notes are asked: naturals, sharps and flats, or both. Never neither. */
+export function noteChoice(settings: Pick<Settings, 'naturalsOnly' | 'accidentalsOnly'>): { naturals: boolean; accidentals: boolean } {
+  if (settings.naturalsOnly) return { naturals: true, accidentals: false };
+  return { naturals: !settings.accidentalsOnly, accidentals: true };
+}
+
+/** The stored flags for a choice of notes. Switching both off is refused: null. */
+export function noteFlags(choice: { naturals: boolean; accidentals: boolean }): Pick<Settings, 'naturalsOnly' | 'accidentalsOnly'> | null {
+  if (!choice.naturals && !choice.accidentals) return null;
+  return { naturalsOnly: !choice.accidentals, accidentalsOnly: !choice.naturals };
+}
 
 export function emptyProgress(): ProgressData {
   return {
@@ -418,6 +440,11 @@ export function migrateV1(old: Record<string, unknown>): ProgressData {
 export function normaliseSettings(raw: Partial<Settings> | undefined): Settings {
   const settings = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
   if (!MODES.includes(settings.mode)) settings.mode = 'positions';
+  // Settings from before 0.3.1 have no accidentalsOnly: they keep meaning what they meant.
+  // Both set can only come from an older build switching back to "Naturals only" on settings
+  // it took over from a newer one; it wrote naturalsOnly last, so that is what counts.
+  settings.naturalsOnly = settings.naturalsOnly === true;
+  settings.accidentalsOnly = settings.accidentalsOnly === true && !settings.naturalsOnly;
   if (!Array.isArray(settings.strings) || settings.strings.length !== STRING_COUNT) settings.strings = DEFAULT_SETTINGS.strings;
   if (!Array.isArray(settings.positions) || settings.positions.length !== 5) settings.positions = DEFAULT_SETTINGS.positions;
   return settings;
