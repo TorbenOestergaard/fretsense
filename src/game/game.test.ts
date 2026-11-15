@@ -6,14 +6,22 @@ import {
   dayKey,
   emptyProgress,
   itemKey,
+  knowledgePoints,
   levelInfo,
   levelOf,
+  levelStart,
   masterySummary,
   migrateV1,
+  normaliseProgress,
+  pointsOf,
   positionKey,
+  practiceByDay,
+  practiceMs,
+  practiceStep,
+  progressStore,
   streakOf,
-  xpFor,
   type ItemStat,
+  type Mode,
   type ProgressData,
   type Settings,
 } from './progress';
@@ -34,7 +42,7 @@ const settings = (patch: Partial<Settings> = {}): Settings => ({ ...DEFAULT_SETT
 
 function answerMany(data: ProgressData, string: number, pc: number, times: number, ms: number, firstTry = true) {
   let next = data;
-  for (let i = 0; i < times; i++) next = applyAnswer(next, { mode: 'notes', key: itemKey(string, pc), string, pc, firstTry, ms, combo: 0 }, NOW).data;
+  for (let i = 0; i < times; i++) next = applyAnswer(next, { mode: 'notes', key: itemKey(string, pc), string, pc, firstTry, ms }, NOW).data;
   return next;
 }
 
@@ -70,8 +78,8 @@ describe('mastery', () => {
   it('keeps each exercise in its own statistics', () => {
     let data = answerMany(emptyProgress(), 3, 0, 8, 1500);
     for (let i = 0; i < 4; i++) {
-      data = applyAnswer(data, { mode: 'sweep', key: itemKey(3, 0), string: 3, pc: 0, firstTry: false, ms: 9000, combo: 0 }, NOW).data;
-      data = applyAnswer(data, { mode: 'positions', key: positionKey('major', 1, '5'), pc: 7, firstTry: false, ms: 9000, combo: 0 }, NOW).data;
+      data = applyAnswer(data, { mode: 'sweep', key: itemKey(3, 0), string: 3, pc: 0, firstTry: false, ms: 9000 }, NOW).data;
+      data = applyAnswer(data, { mode: 'positions', key: positionKey('major', 1, '5'), pc: 7, firstTry: false, ms: 9000 }, NOW).data;
     }
     expect(noteLevel(data, 3, 0)).toBe(4);
     expect(levelOf(data.stats.sweep[itemKey(3, 0)])).toBe(1);
@@ -111,7 +119,7 @@ describe('analytics', () => {
   it('derives averages per string, fret and day from the answer log', () => {
     let data = emptyProgress();
     const add = (mode: 'notes' | 'sweep', string: number, pc: number, fret: number, ms: number, firstTry: boolean, t: number) => {
-      data = applyAnswer(data, { mode, key: itemKey(string, pc), string, fret, pc, firstTry, ms, combo: 0 }, t).data;
+      data = applyAnswer(data, { mode, key: itemKey(string, pc), string, fret, pc, firstTry, ms }, t).data;
     };
     const DAY = 24 * 3600 * 1000;
     add('notes', 3, 0, 5, 4000, true, NOW - DAY);
@@ -134,18 +142,97 @@ describe('analytics', () => {
   });
 });
 
-describe('xp and streaks', () => {
-  it('rewards speed and combos, and gives little for a miss', () => {
-    expect(xpFor(true, 1500, 0)).toBe(20);
-    expect(xpFor(true, 6000, 0)).toBe(10);
-    expect(xpFor(true, 1500, 10)).toBe(40);
-    expect(xpFor(false, 1500, 0)).toBe(2);
+describe('points, levels and streaks', () => {
+  const at = (data: ProgressData, t: number, ms: number, opts: { mode?: Mode; pc?: number; firstTry?: boolean } = {}) =>
+    applyAnswer(data, { mode: opts.mode ?? 'notes', key: itemKey(0, opts.pc ?? 0), string: 0, pc: opts.pc ?? 0, firstTry: opts.firstTry ?? true, ms }, t).data;
+
+  it('counts practice time from the gaps between answers, leaving out breaks', () => {
+    expect(practiceStep(null, { t: NOW, ms: 3200 })).toBe(3200); // first answer: its own time
+    expect(practiceStep(NOW, { t: NOW + 4500, ms: 3000 })).toBe(4500); // includes the feedback pause
+    expect(practiceStep(NOW, { t: NOW + 30000, ms: 3000 })).toBe(30000);
+    expect(practiceStep(NOW, { t: NOW + 30001, ms: 3000 })).toBe(3000); // a break: only the answer itself
+    expect(practiceStep(NOW, { t: NOW + 600000, ms: 500000 })).toBe(30000); // walked away mid-question
+    const lateNight = new Date(2026, 10, 13, 23, 59, 55).getTime();
+    expect(practiceStep(lateNight, { t: lateNight + 10000, ms: 2000 })).toBe(2000); // a new day starts fresh
+
+    let data = emptyProgress();
+    for (let i = 0; i < 31; i++) data = at(data, NOW + i * 4000, 2500, { pc: i % 12 });
+    data = at(data, NOW + 3600000, 2500); // an hour later
+    expect(data.days[dayKey(NOW)].ms).toBe(2500 + 30 * 4000 + 2500);
+    expect(practiceMs(data)).toBe(125000);
+    expect(pointsOf(data).time).toBe(2);
+    expect(practiceByDay(data.events)).toEqual({ [dayKey(NOW)]: 125000 });
   });
 
-  it('levels up at growing thresholds', () => {
-    expect(levelInfo(0)).toEqual({ level: 1, into: 0, need: 200 });
-    expect(levelInfo(200).level).toBe(2);
-    expect(levelInfo(499)).toEqual({ level: 2, into: 299, need: 300 });
+  it('gives one point per Solid item and two per Instant item, in every exercise', () => {
+    let data = emptyProgress();
+    for (let i = 0; i < 4; i++) {
+      data = at(data, NOW + i * 1000, 1500, { pc: 0 }); // instant
+      data = at(data, NOW + i * 1000, 3500, { pc: 1 }); // solid: 0.75
+      data = at(data, NOW + i * 1000, 5500, { pc: 2 }); // learning
+      data = at(data, NOW + i * 1000, 1500, { pc: 3, mode: 'sweep' }); // instant, other exercise
+      data = at(data, NOW + i * 1000, 3500, { pc: 4, mode: 'positions' }); // solid
+    }
+    expect(knowledgePoints(data.stats)).toBe(2 + 1 + 0 + 2 + 1);
+    expect(pointsOf(data)).toEqual({ time: 0, knowledge: 6, total: 6 });
+    // Points follow the current status: two misses take the Instant note down to Solid.
+    data = at(at(data, NOW + 9000, 9000, { pc: 0, firstTry: false }), NOW + 9500, 9000, { pc: 0, firstTry: false });
+    expect(knowledgePoints(data.stats)).toBe(5);
+  });
+
+  it('starts level L at 15·L·(L−1) points', () => {
+    expect([1, 2, 3, 4, 5, 10, 15, 20].map(levelStart)).toEqual([0, 30, 90, 180, 300, 1350, 3150, 5700]);
+    expect(levelInfo(0)).toEqual({ level: 1, into: 0, need: 30 });
+    expect(levelInfo(29).level).toBe(1);
+    expect(levelInfo(30)).toEqual({ level: 2, into: 0, need: 60 });
+    expect(levelInfo(299)).toEqual({ level: 4, into: 119, need: 120 });
+    expect(levelInfo(300).level).toBe(5);
+    expect(levelInfo(1350)).toEqual({ level: 10, into: 0, need: 300 });
+  });
+
+  it('loads data stored by an older build: nothing is lost and the practice time is filled in from the log', () => {
+    let data = emptyProgress();
+    for (let i = 0; i < 40; i++) data = at(data, NOW - 24 * 3600 * 1000 + i * 5000, 2000, { pc: i % 12 });
+    for (let i = 0; i < 20; i++) data = at(data, NOW + i * 5000, 2000, { pc: i % 12, mode: 'sweep' });
+    // As version 0.2 stored it: XP everywhere, no time per day.
+    const stored = JSON.parse(JSON.stringify({
+      ...data,
+      xp: 5120,
+      days: Object.fromEntries(Object.entries(data.days).map(([key, d]) => [key, { answers: d.answers, correct: d.correct, xp: 2560 }])),
+      sessions: [{ t: NOW, mode: 'sweep', n: 20, correct: 20, avgMs: 2000, xp: 400 }],
+    }));
+    expect(stored.days[dayKey(NOW)]).not.toHaveProperty('ms');
+
+    const loaded = normaliseProgress(stored);
+    expect(loaded.events).toEqual(data.events);
+    expect(loaded.stats).toEqual(data.stats);
+    expect(loaded.sessions).toEqual(stored.sessions);
+    expect(loaded.xp).toBe(5120);
+    expect(loaded.days[dayKey(NOW)]).toEqual({ answers: 20, correct: 20, xp: 2560, ms: 2000 + 19 * 5000 });
+    expect(loaded.days).toEqual(Object.fromEntries(Object.entries(data.days).map(([key, d]) => [key, { ...d, xp: 2560 }])));
+    expect(pointsOf(loaded)).toEqual(pointsOf(data));
+    expect(normaliseProgress(JSON.parse(JSON.stringify(loaded)))).toEqual(loaded); // loading again changes nothing
+
+    // Not loaded through normaliseProgress at all: the next answer still starts from the log.
+    const next = at(stored as ProgressData, NOW + 20 * 5000, 2000);
+    expect(next.days[dayKey(NOW)].ms).toBe(2000 + 20 * 5000);
+  });
+
+  it('resetting one exercise does not take away the time spent on it', () => {
+    let data = emptyProgress();
+    for (let i = 0; i < 30; i++) data = at(data, NOW + i * 5000, 2000, { pc: i % 12, mode: i % 2 ? 'notes' : 'sweep' });
+    const before = practiceMs(data);
+    expect(before).toBe(2000 + 29 * 5000);
+    progressStore.set(data);
+    progressStore.reset('sweep');
+    const after = progressStore.get();
+    expect(after.events).toHaveLength(15);
+    expect(after.stats.sweep).toEqual({});
+    expect(practiceMs(after)).toBe(before);
+    expect(practiceMs(normaliseProgress(JSON.parse(JSON.stringify(after))))).toBe(before);
+    expect(practiceMs(at(after, NOW + 30 * 5000, 2000))).toBe(before + 5000);
+    progressStore.reset();
+    expect(pointsOf(progressStore.get()).total).toBe(0);
   });
 
   it('counts consecutive days that met the goal, without breaking on an unfinished today', () => {
@@ -310,7 +397,7 @@ describe('session', () => {
     const first = s.question;
     s.noteOn(first.targets[0], 1800);
     expect(s.phase).toBe('feedback');
-    expect(s.lastResult).toMatchObject({ firstTry: true, ms: 1800, combo: 1 });
+    expect(s.lastResult).toMatchObject({ firstTry: true, ms: 1800 });
     s.tick(1800 + FEEDBACK_OK_MS);
     expect(s.phase).toBe('asking');
     expect(s.index).toBe(1);
@@ -331,7 +418,7 @@ describe('session', () => {
     s.noteHeld(wrong, 1300);
     expect(s.hint).toEqual({ kind: 'wrong', midi: wrong });
     s.noteOn(s.question.targets[0], 2500);
-    expect(s.lastResult).toMatchObject({ firstTry: false, mistakes: 1, combo: 0 });
+    expect(s.lastResult).toMatchObject({ firstTry: false, mistakes: 1 });
     expect(s.phase).toBe('feedback');
     s.tick(2500 + FEEDBACK_OK_MS);
     expect(s.phase).toBe('feedback'); // misses get a longer look at the answer

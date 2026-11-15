@@ -16,6 +16,9 @@ import { STRING_COUNT, type ScaleId } from '../music/theory';
 //
 // Every answer is also appended to an event log, from which the Progress view derives average
 // times per string, note, fret, position and day.
+//
+// Points and levels are not accumulated per answer. They are worked out from two things:
+// minutes practised (from the timestamps in the log) and how many items are Solid or Instant.
 
 export type Mode = 'notes' | 'positions' | 'sweep';
 export const MODES: Mode[] = ['notes', 'positions', 'sweep'];
@@ -51,7 +54,14 @@ export interface AnswerEvent {
 export interface DayStat {
   answers: number;
   correct: number;
+  /** No longer used. Kept so that an older build syncing with the same account keeps working. */
   xp: number;
+  /**
+   * Time practised that day in ms (see practiceStep). Stored, although it follows from the log,
+   * because the log is capped and a reset of one exercise removes its answers from it.
+   * Missing in data written by older builds; filled in from the log when the data is loaded.
+   */
+  ms?: number;
 }
 
 export interface SessionRecord {
@@ -61,6 +71,7 @@ export interface SessionRecord {
   n: number;
   correct: number;
   avgMs: number;
+  /** No longer used; see DayStat.xp. */
   xp: number;
 }
 
@@ -86,6 +97,7 @@ export interface ProgressData {
   v: 2;
   stats: Record<Mode, Record<string, ItemStat>>;
   events: AnswerEvent[];
+  /** No longer used; see DayStat.xp. Points are worked out by pointsOf(). */
   xp: number;
   days: Record<string, DayStat>;
   sessions: SessionRecord[];
@@ -194,25 +206,81 @@ export function masterySummary(data: ProgressData, mode: 'notes' | 'sweep' = 'no
 }
 
 // ---------------------------------------------------------------------------
-// XP, levels, streaks
+// Points, levels, streaks
+//
+// Points = minutes practised + knowledge. One point per minute at the guitar, one per item that
+// is Solid and two per item that is Instant, in all three exercises. Knowledge points follow the
+// current status, so they (and with them the level) can drop a little when an item slips.
 
-export function xpFor(firstTry: boolean, ms: number, combo: number): number {
-  if (!firstTry) return 2;
-  const speedBonus = Math.round(10 * Math.min(1, Math.max(0, (6000 - ms) / 4500)));
-  const multiplier = combo >= 10 ? 2 : combo >= 5 ? 1.5 : 1;
-  return Math.round((10 + speedBonus) * multiplier);
+/** A pause between two answers longer than this is a break, not practice. */
+export const MAX_GAP_MS = 30000;
+export const POINTS_SOLID = 1;
+export const POINTS_INSTANT = 2;
+
+/**
+ * Practice time one answer adds: the time since the previous answer when that was the same day
+ * and at most 30 s ago (so the feedback pause and the root step count), otherwise the time the
+ * answer itself took. `prevT` is when the previous answer in the log was given, in any exercise.
+ */
+export function practiceStep(prevT: number | null, e: { t: number; ms: number }): number {
+  if (prevT !== null && dayKey(prevT) === dayKey(e.t)) {
+    const gap = e.t - prevT;
+    if (gap >= 0 && gap <= MAX_GAP_MS) return gap;
+  }
+  return Math.min(Math.max(0, Math.round(e.ms)), MAX_GAP_MS);
 }
 
-export function levelInfo(xp: number): { level: number; into: number; need: number } {
-  let level = 1;
-  let remaining = xp;
-  let need = 200;
-  while (remaining >= need) {
-    remaining -= need;
-    level++;
-    need = 200 + 100 * (level - 1);
+/** Practice time per day in ms, from a log in time order. */
+export function practiceByDay(events: AnswerEvent[]): Record<string, number> {
+  const days: Record<string, number> = {};
+  let prevT: number | null = null;
+  for (const e of events) {
+    const day = dayKey(e.t);
+    days[day] = (days[day] ?? 0) + practiceStep(prevT, e);
+    prevT = e.t;
   }
-  return { level, into: remaining, need };
+  return days;
+}
+
+/** Total time practised in ms. */
+export function practiceMs(data: Pick<ProgressData, 'days'>): number {
+  return Object.values(data.days).reduce((sum, d) => sum + (d.ms ?? 0), 0);
+}
+
+export function knowledgePoints(stats: ProgressData['stats']): number {
+  let points = 0;
+  for (const mode of MODES) {
+    for (const stat of Object.values(stats[mode] ?? {})) {
+      const level = levelOf(stat);
+      points += level === 4 ? POINTS_INSTANT : level === 3 ? POINTS_SOLID : 0;
+    }
+  }
+  return points;
+}
+
+export interface Points {
+  /** One per whole minute practised. */
+  time: number;
+  /** One per Solid item, two per Instant item. */
+  knowledge: number;
+  total: number;
+}
+
+export function pointsOf(data: Pick<ProgressData, 'days' | 'stats'>): Points {
+  const time = Math.floor(practiceMs(data) / 60000);
+  const knowledge = knowledgePoints(data.stats);
+  return { time, knowledge, total: time + knowledge };
+}
+
+/** Points at which a level starts: 0, 30, 90, 180, 300, ... (level 10 at 1350). */
+export function levelStart(level: number): number {
+  return 15 * level * (level - 1);
+}
+
+export function levelInfo(points: number): { level: number; into: number; need: number } {
+  let level = 1;
+  while (levelStart(level + 1) <= points) level++;
+  return { level, into: points - levelStart(level), need: levelStart(level + 1) - levelStart(level) };
 }
 
 export function dayKey(t: number): string {
@@ -249,12 +317,10 @@ export interface AnswerInput {
   fret?: number | null;
   firstTry: boolean;
   ms: number;
-  combo: number;
 }
 
 export interface AnswerOutcome {
   data: ProgressData;
-  xp: number;
   before: MasteryLevel;
   after: MasteryLevel;
 }
@@ -278,7 +344,6 @@ export function applyAnswer(data: ProgressData, answer: AnswerInput, now: number
   const ok = answer.firstTry ? 1 : 0;
   const next = advanceStat(prev, ok, answer.ms, now);
 
-  const xp = xpFor(answer.firstTry, answer.ms, answer.combo);
   const today = dayKey(now);
   const day = data.days[today] ?? { answers: 0, correct: 0, xp: 0 };
   const event: AnswerEvent = {
@@ -291,14 +356,16 @@ export function applyAnswer(data: ProgressData, answer: AnswerInput, now: number
     ms: Math.round(answer.ms),
     ok,
   };
+  const last = data.events.length ? data.events[data.events.length - 1].t : null;
+  // Data from an older build may lack the day's time; then it starts from what the log says.
+  const dayMs = day.ms ?? practiceByDay(data.events)[today] ?? 0;
   const nextData: ProgressData = {
     ...data,
     stats: { ...data.stats, [answer.mode]: { ...group, [answer.key]: next } },
     events: [...data.events, event].slice(-MAX_EVENTS),
-    xp: data.xp + xp,
-    days: { ...data.days, [today]: { answers: day.answers + 1, correct: day.correct + ok, xp: day.xp + xp } },
+    days: { ...data.days, [today]: { ...day, answers: day.answers + 1, correct: day.correct + ok, ms: dayMs + practiceStep(last, event) } },
   };
-  return { data: nextData, xp, before, after: levelOf(next) };
+  return { data: nextData, before, after: levelOf(next) };
 }
 
 export function addSession(data: ProgressData, record: SessionRecord): ProgressData {
@@ -356,18 +423,32 @@ export function normaliseSettings(raw: Partial<Settings> | undefined): Settings 
   return settings;
 }
 
+/**
+ * Gives every day its practice time. Data from before points existed has none: it is worked out
+ * from the log. A stored time is never lowered, because the log may no longer hold all of that
+ * day's answers (log limit, or one exercise was reset).
+ */
+export function withPracticeTime(days: Record<string, DayStat>, events: AnswerEvent[]): Record<string, DayStat> {
+  const fromLog = practiceByDay(events);
+  const out: Record<string, DayStat> = {};
+  for (const [key, day] of Object.entries(days)) out[key] = { ...day, ms: Math.max(day.ms ?? 0, fromLog[key] ?? 0) };
+  return out;
+}
+
 /** Fills in anything missing from stored, synced or imported progress. */
 export function normaliseProgress(raw: unknown): ProgressData {
   const parsed = (raw && typeof raw === 'object' ? raw : {}) as Partial<ProgressData>;
   const base = emptyProgress();
+  const events = Array.isArray(parsed.events) ? parsed.events : [];
+  const days = parsed.days && typeof parsed.days === 'object' ? parsed.days : {};
   return {
     ...base,
     ...parsed,
     v: 2,
     stats: { ...base.stats, ...(parsed.stats ?? {}) },
-    events: Array.isArray(parsed.events) ? parsed.events : [],
+    events,
     xp: typeof parsed.xp === 'number' ? parsed.xp : 0,
-    days: parsed.days && typeof parsed.days === 'object' ? parsed.days : {},
+    days: withPracticeTime(days, events),
     sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
     settings: normaliseSettings(parsed.settings),
   };

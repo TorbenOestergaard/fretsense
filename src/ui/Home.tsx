@@ -1,4 +1,4 @@
-import { DAILY_GOAL, dayKey, levelInfo, progressStore, streakOf, type Mode, type PositionHelp } from '../game/progress';
+import { DAILY_GOAL, dayKey, levelInfo, pointsOf, progressStore, streakOf, type Mode, type PositionHelp } from '../game/progress';
 import { enabledPositions, positionRoundSize } from '../game/scheduler';
 import { SCALES, SCALE_IDS, STRING_NAMES, buildScale, parseNote, positionsOf } from '../music/theory';
 import { positionFrets } from './Game';
@@ -32,7 +32,8 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
   const data = useProgress();
   const micState = useMicState();
   const { settings } = data;
-  const level = levelInfo(data.xp);
+  const points = pointsOf(data);
+  const level = levelInfo(points.total);
   const today = data.days[dayKey(Date.now())]?.correct ?? 0;
   const streak = streakOf(data.days, Date.now());
   const scaleType = SCALES[settings.scaleId];
@@ -58,7 +59,7 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
       <header className="topbar">
         <Brand onHome={() => window.scrollTo({ top: 0 })} />
         <div className="stats">
-          <div className="stat" title={`${level.into} of ${level.need} XP to the next level`}>
+          <div className="stat" title={`${points.total} points: ${points.time} for minutes practised, ${points.knowledge} for Solid and Instant items. ${level.need - level.into} more to level ${level.level + 1}.`}>
             <span className="stat-label">Level {level.level}</span>
             <div className="bar xp">
               <div style={{ width: `${(level.into / level.need) * 100}%` }} />

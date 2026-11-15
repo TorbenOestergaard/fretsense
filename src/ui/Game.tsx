@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { mic } from '../audio/mic';
-import { progressStore, type MasteryLevel, type Mode } from '../game/progress';
+import { pointsOf, practiceMs, progressStore, type MasteryLevel, type Mode, type Points } from '../game/progress';
 import { Scheduler } from '../game/scheduler';
 import { REVEAL_AFTER_MS, Session, type AnswerResult } from '../game/session';
 import { POSITION_MAX_FRET, STRING_NAMES, STRING_NUMBERS, midiName, pcName, pcOf, type ScalePosition } from '../music/theory';
@@ -13,7 +13,8 @@ export interface RoundSummary {
   mode: Mode;
   context: string | null;
   results: AnswerResult[];
-  xp: number;
+  /** Points and practice time when the round started, to show what the round added. */
+  before: { points: Points; ms: number };
   bestCombo: number;
   changes: { key: string; label: string; before: MasteryLevel; after: MasteryLevel }[];
 }
@@ -32,7 +33,7 @@ export const positionFrets = (p: ScalePosition) => (p.lo === 0 ? `open to fret $
 
 export function Game({ onDone, onQuit }: Props) {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const totals = useRef({ xp: 0, lastXp: 0, changes: [] as RoundSummary['changes'] });
+  const totals = useRef({ changes: [] as RoundSummary['changes'] });
   const micState = useMicState();
 
   const [session] = useState(() => {
@@ -41,16 +42,21 @@ export function Game({ onDone, onQuit }: Props) {
     const onResult = (result: AnswerResult) => {
       const q = result.question;
       const outcome = progressStore.record(
-        { mode: q.mode, key: q.key, pc: q.pc, string: result.string, fret: result.fret, firstTry: result.firstTry, ms: result.ms, combo: result.combo },
+        { mode: q.mode, key: q.key, pc: q.pc, string: result.string, fret: result.fret, firstTry: result.firstTry, ms: result.ms },
         Date.now(),
       );
-      totals.current.xp += outcome.xp;
-      totals.current.lastXp = outcome.xp;
       const existing = totals.current.changes.find((c) => c.key === q.key);
       if (existing) existing.after = outcome.after;
       else totals.current.changes.push({ key: q.key, label: q.label, before: outcome.before, after: outcome.after });
     };
-    return { run: new Session(scheduler, scheduler.roundLength(), performance.now(), onResult), scheduler, mode: settings.mode, help: settings.positionHelp };
+    const start = progressStore.get();
+    return {
+      run: new Session(scheduler, scheduler.roundLength(), performance.now(), onResult),
+      scheduler,
+      mode: settings.mode,
+      help: settings.positionHelp,
+      before: { points: pointsOf(start), ms: practiceMs(start) },
+    };
   });
   const run = session.run;
   const scale = session.scheduler.scale;
@@ -91,13 +97,13 @@ export function Game({ onDone, onQuit }: Props) {
       n: run.results.length,
       correct: firstTries.length,
       avgMs,
-      xp: totals.current.xp,
+      xp: 0, // unused since points replaced XP; the field stays for older builds
     });
     onDone({
       mode: session.mode,
       context: scale?.name ?? null,
       results: run.results,
-      xp: totals.current.xp,
+      before: session.before,
       bestCombo: run.bestCombo,
       changes: totals.current.changes,
     });
@@ -165,7 +171,6 @@ export function Game({ onDone, onQuit }: Props) {
           </span>
         </div>
         <div className={run.combo >= 5 ? 'pill pill-hot' : 'pill'}>Combo {run.combo}</div>
-        <div className="pill">{totals.current.xp} XP</div>
       </header>
 
       <section className={`prompt prompt-${run.phase}${run.lastResult?.firstTry && run.phase === 'feedback' ? ' prompt-ok' : ''}`}>
@@ -196,7 +201,7 @@ export function Game({ onDone, onQuit }: Props) {
           />
         </div>
         <p className="feedback" role="status">
-          <Feedback run={run} xp={totals.current.lastXp} shortName={shortName} />
+          <Feedback run={run} shortName={shortName} />
         </p>
       </section>
 
@@ -231,7 +236,7 @@ export function Game({ onDone, onQuit }: Props) {
   );
 }
 
-function Feedback({ run, xp, shortName }: { run: Session; xp: number; shortName: string }) {
+function Feedback({ run, shortName }: { run: Session; shortName: string }) {
   const q = run.question;
   const inBox = !!q.position;
   const where = whereText(q.cells, inBox);
@@ -244,7 +249,7 @@ function Feedback({ run, xp, shortName }: { run: Session; xp: number; shortName:
     if (r.firstTry) {
       return (
         <span className="good">
-          {inBox ? `${q.noteName}` : where} · {(r.ms / 1000).toFixed(1)} s · +{xp} XP
+          {inBox ? `${q.noteName}` : where} · {(r.ms / 1000).toFixed(1)} s
         </span>
       );
     }

@@ -1,4 +1,4 @@
-import { MASTERY_LABELS, MODE_TITLES, levelInfo } from '../game/progress';
+import { MASTERY_LABELS, MODE_TITLES, levelInfo, pointsOf, practiceMs } from '../game/progress';
 import type { RoundSummary } from './Game';
 import { Brand } from './Brand';
 import { useProgress } from './hooks';
@@ -16,8 +16,14 @@ export function Summary({ summary, onAgain, onHome }: Props) {
   const firstTries = results.filter((r) => r.firstTry);
   const accuracy = results.length ? Math.round((firstTries.length / results.length) * 100) : 0;
   const avg = firstTries.length ? firstTries.reduce((sum, r) => sum + r.ms, 0) / firstTries.length / 1000 : null;
-  const level = levelInfo(data.xp);
-  const leveledUp = levelInfo(data.xp - summary.xp).level < level.level;
+  // Points are worked out from practice time and status, so a round's share is the difference.
+  const points = pointsOf(data);
+  const gained = points.total - summary.before.points.total;
+  const knowledge = points.knowledge - summary.before.points.knowledge;
+  const roundSeconds = Math.round((practiceMs(data) - summary.before.ms) / 1000);
+  const level = levelInfo(points.total);
+  const levelBefore = levelInfo(summary.before.points.total).level;
+  const signed = (n: number) => (n < 0 ? `−${-n}` : `+${n}`);
 
   const movedUp = summary.changes.filter((c) => c.after > c.before && c.before > 0);
   const fresh = summary.changes.filter((c) => c.before === 0).length;
@@ -66,9 +72,12 @@ export function Summary({ summary, onAgain, onHome }: Props) {
           <span className="muted small">in a row</span>
         </div>
         <div className="tile">
-          <span className="stat-label">Earned</span>
-          <b>+{summary.xp} XP</b>
-          <span className={leveledUp ? 'good small' : 'muted small'}>{leveledUp ? `Level ${level.level} reached` : `Level ${level.level}`}</span>
+          <span className="stat-label">Points</span>
+          <b>{signed(gained)}</b>
+          <span className={level.level > levelBefore ? 'good small' : 'muted small'} title="One point per minute practised, one per Solid item, two per Instant item">
+            {level.level > levelBefore ? `Level ${level.level} reached · ` : level.level < levelBefore ? `Back to level ${level.level} · ` : ''}
+            {Math.floor(roundSeconds / 60)}:{String(roundSeconds % 60).padStart(2, '0')} min practised, {signed(knowledge)} for status
+          </span>
         </div>
       </section>
 

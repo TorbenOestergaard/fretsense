@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addSession, applyAnswer, emptyProgress, itemKey, type Mode, type ProgressData } from '../game/progress';
+import { MAX_EVENTS, addSession, applyAnswer, emptyProgress, itemKey, levelInfo, normaliseProgress, pointsOf, practiceByDay, practiceMs, type AnswerEvent, type Mode, type ProgressData } from '../game/progress';
 import { fingerprint, fromSyncDoc, importProgress, mergeProgress, toSyncDoc } from './merge';
 
 const DAY = 24 * 3600 * 1000;
@@ -11,7 +11,7 @@ function play(data: ProgressData, t: number, n: number, opts: { mode?: Mode; str
   for (let i = 0; i < n; i++) {
     next = applyAnswer(
       next,
-      { mode: opts.mode ?? 'notes', key: itemKey(opts.string ?? 0, i % 4), pc: i % 4, string: opts.string ?? 0, fret: i % 4, firstTry: !opts.miss, ms: 1500 + 100 * i, combo: i },
+      { mode: opts.mode ?? 'notes', key: itemKey(opts.string ?? 0, i % 4), pc: i % 4, string: opts.string ?? 0, fret: i % 4, firstTry: !opts.miss, ms: 1500 + 100 * i },
       t + i * 10000,
     ).data;
   }
@@ -51,8 +51,7 @@ describe('mergeProgress', () => {
     expect(correct).toBe(14);
     const answers = Object.values(merged.days).reduce((n, d) => n + d.answers, 0);
     expect(answers).toBe(19);
-    expect(merged.xp).toBe(a.xp + b.xp - shared.xp);
-    expect(merged.xp).toBe(Object.values(merged.days).reduce((n, d) => n + d.xp, 0));
+    expect(practiceMs(merged)).toBe(practiceMs(a) + practiceMs(b) - practiceMs(shared));
   });
 
   it('gives the same result whichever browser merges', () => {
@@ -76,7 +75,7 @@ describe('mergeProgress', () => {
     const a = play(emptyProgress(), T0, 10);
     const b = play(emptyProgress(), T0 + 3600000, 6);
     const merged = mergeProgress(a, b);
-    expect(merged.xp).toBe(a.xp + b.xp);
+    expect(practiceMs(merged)).toBe(practiceMs(a) + practiceMs(b));
   });
 
   it('keeps history that is not in the log without doubling it', () => {
@@ -88,8 +87,8 @@ describe('mergeProgress', () => {
     const b = play(carried, T0 + DAY, 4);
     const merged = mergeProgress(a, b);
     expect(merged.stats.notes['0:0'].seen).toBe(32);
-    expect(merged.days['2026-10-30']).toEqual({ answers: 30, correct: 25, xp: 400 });
-    expect(merged.xp).toBe(400 + (a.xp - 400) + (b.xp - 400));
+    expect(merged.days['2026-10-30']).toEqual({ answers: 30, correct: 25, xp: 400, ms: 0 });
+    expect(merged.xp).toBe(400); // the unused XP field is carried along, not added up
   });
 
   it('keeps this browser’s settings, but a fresh browser adopts the synced ones', () => {
@@ -133,7 +132,7 @@ describe('mergeProgress', () => {
     const a: ProgressData = { ...emptyProgress(), resets: { at: resetAt, all: resetAt } };
     const merged = mergeProgress(shared, a);
     expect(merged.events).toHaveLength(0);
-    expect(merged.xp).toBe(0);
+    expect(pointsOf(merged).total).toBe(0);
     expect(merged.days).toEqual({});
   });
 
@@ -151,5 +150,94 @@ describe('mergeProgress', () => {
     const a = play(emptyProgress(), T0, 5);
     expect(fingerprint(fromSyncDoc(JSON.parse(JSON.stringify(toSyncDoc(a)))))).toBe(fingerprint(a));
     expect(fingerprint(play(a, T0 + DAY, 1))).not.toBe(fingerprint(a));
+  });
+});
+
+describe('points after a merge', () => {
+  /** Replays a list of answers in time order, as one browser would have recorded them. */
+  const record = (answers: { t: number; string: number; pc: number; ms: number; ok: boolean; mode: Mode }[], from = emptyProgress()) =>
+    answers.reduce((data, x) => applyAnswer(data, { mode: x.mode, key: itemKey(x.string, x.pc), pc: x.pc, string: x.string, fret: x.pc, firstTry: x.ok, ms: x.ms }, x.t).data, from);
+
+  // Two days of practice, 4 s apart, with a break in the middle of the first day. Mostly fast,
+  // so several notes end up Solid or Instant.
+  const answers = Array.from({ length: 120 }, (_, i) => ({
+    t: T0 + (i < 60 ? 0 : DAY) + i * 4000 + (i >= 30 && i < 60 ? 20 * 60000 : 0),
+    string: i % 2,
+    pc: i % 5,
+    ms: 1200 + 37 * (i % 9),
+    ok: i % 11 !== 0,
+    mode: (i % 3 === 0 ? 'sweep' : 'notes') as Mode,
+  }));
+
+  it('two browsers merged show the same points and level as one browser with the same log', () => {
+    const single = record(answers);
+    expect(pointsOf(single).time).toBeGreaterThan(0);
+    expect(pointsOf(single).knowledge).toBeGreaterThan(0);
+
+    // Both browsers share the first 20 answers; after that the answers alternate between them,
+    // so every day and most notes are split over the two logs.
+    const shared = record(answers.slice(0, 20));
+    const a = record(answers.slice(20).filter((_, i) => i % 2 === 0), shared);
+    const b = record(answers.slice(20).filter((_, i) => i % 2 === 1), shared);
+    expect(practiceMs(a) + practiceMs(b)).not.toBe(practiceMs(single));
+
+    for (const merged of [mergeProgress(a, b), mergeProgress(b, a), mergeProgress(mergeProgress(a, b), a)]) {
+      expect(merged.events).toEqual(single.events);
+      expect(merged.stats).toEqual(single.stats);
+      expect(merged.days).toEqual(single.days);
+      expect(pointsOf(merged)).toEqual(pointsOf(single));
+      expect(levelInfo(pointsOf(merged).total)).toEqual(levelInfo(pointsOf(single).total));
+    }
+  });
+
+  it('data from an older build has no practice time: it is filled in from the log, on either side', () => {
+    const single = record(answers);
+    const old = (data: ProgressData): ProgressData => ({
+      ...data,
+      days: Object.fromEntries(Object.entries(data.days).map(([key, { ms: _ms, ...day }]) => [key, day])),
+    });
+    const a = old(record(answers.slice(0, 70)));
+    const b = record(answers.slice(50));
+    expect(pointsOf(mergeProgress(a, b))).toEqual(pointsOf(single));
+    expect(pointsOf(mergeProgress(b, fromSyncDoc(JSON.parse(JSON.stringify(toSyncDoc(a))))))).toEqual(pointsOf(single));
+  });
+
+  it('time kept beyond the log (a reset exercise, the log limit) survives a merge and is not doubled', () => {
+    const full = record(answers);
+    // The sweep answers leave the log, as after "Reset String sweep"; the day totals stay.
+    const reset: ProgressData = { ...full, events: full.events.filter((e) => e.m !== 'sweep'), stats: { ...full.stats, sweep: {} } };
+    expect(Object.values(practiceByDay(reset.events)).reduce((x, y) => x + y, 0)).toBeLessThan(practiceMs(full));
+    const other = record(answers.slice(0, 40).filter((x) => x.mode !== 'sweep'));
+    expect(practiceMs(mergeProgress(reset, other))).toBe(practiceMs(full));
+    expect(practiceMs(mergeProgress(other, reset))).toBe(practiceMs(full));
+    expect(practiceMs(mergeProgress(reset, reset))).toBe(practiceMs(full));
+  });
+
+  it('answers falling off the end of the log do not take their practice time with them', () => {
+    // A full log: 30,000 answers, 5 s apart, 1,000 a day.
+    const events: AnswerEvent[] = Array.from({ length: MAX_EVENTS }, (_, i) => ({
+      t: T0 - 40 * DAY + Math.floor(i / 1000) * DAY + (i % 1000) * 5000,
+      m: 'notes',
+      k: itemKey(i % 6, i % 12),
+      s: i % 6,
+      f: i % 12,
+      pc: i % 12,
+      ms: 2000,
+      ok: 1,
+    }));
+    const days = Object.fromEntries(Object.entries(practiceByDay(events)).map(([key, ms]) => [key, { answers: 1000, correct: 1000, xp: 0, ms }]));
+    const full: ProgressData = { ...emptyProgress(), events, days };
+    const before = practiceMs(full);
+    expect(before).toBe(30 * (2000 + 999 * 5000));
+
+    const more = play(full, T0, 50);
+    expect(more.events).toHaveLength(MAX_EVENTS);
+    expect(more.events[0]).toBe(events[50]);
+    const added = 1500 + 49 * 10000;
+    expect(practiceMs(more)).toBe(before + added);
+    // Loading it again, and merging it with an older copy, keep the full time.
+    expect(practiceMs(normaliseProgress(JSON.parse(JSON.stringify(more))))).toBe(before + added);
+    expect(practiceMs(mergeProgress(more, full))).toBe(before + added);
+    expect(practiceMs(mergeProgress(full, more))).toBe(before + added);
   });
 });

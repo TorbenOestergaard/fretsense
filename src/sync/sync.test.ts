@@ -56,7 +56,7 @@ const T0 = new Date(2026, 10, 1, 12).getTime();
 function play(data: ProgressData, t: number, n: number): ProgressData {
   let next = data;
   for (let i = 0; i < n; i++) {
-    next = applyAnswer(next, { mode: 'notes', key: itemKey(0, i % 4), pc: i % 4, string: 0, fret: i % 4, firstTry: true, ms: 1500, combo: 0 }, t + i * 10000).data;
+    next = applyAnswer(next, { mode: 'notes', key: itemKey(0, i % 4), pc: i % 4, string: 0, fret: i % 4, firstTry: true, ms: 1500 }, t + i * 10000).data;
   }
   return next;
 }
@@ -86,7 +86,7 @@ describe('sync between two browsers', () => {
     await chrome.syncNow();
     chromeData = progressStore.get();
     expect(chromeData.events).toHaveLength(14);
-    expect(chromeData.xp).toBe(safariData.xp);
+    expect(chromeData.days).toEqual(safariData.days);
     expect(chromeData.stats).toEqual(safariData.stats);
 
     // Nothing new on either side: no upload.

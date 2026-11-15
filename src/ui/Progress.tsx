@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { bucketOf, dailySeries, eventsFor, groupBy, lastDays, parsePositionKey, type Bucket, type DayPoint, type NoteFilter } from '../game/analytics';
-import { DAILY_GOAL, MODES, MODE_TITLES, dayKey, levelInfo, progressStore, streakOf, type Mode, type ProgressData } from '../game/progress';
+import { DAILY_GOAL, MODES, MODE_TITLES, dayKey, levelInfo, pointsOf, practiceMs, progressStore, streakOf, type Mode, type ProgressData } from '../game/progress';
 import { SCALES, SCALE_IDS, STRING_NAMES, degreeOrdinal, pcName, type ScaleId } from '../music/theory';
 import { importProgress, looksLikeProgress, toSyncDoc } from '../sync/merge';
 import { sync } from '../sync/sync';
@@ -54,10 +54,11 @@ export function Progress({ onBack }: { onBack: () => void }) {
   };
 
   const now = Date.now();
-  const level = levelInfo(data.xp);
+  const points = pointsOf(data);
+  const level = levelInfo(points.total);
   const streak = streakOf(data.days, now);
   const today = data.days[dayKey(now)]?.correct ?? 0;
-  const practiceMs = data.events.reduce((sum, e) => sum + Math.min(e.ms, 15000), 0);
+  const practised = practiceMs(data);
 
   const inPositions = mode === 'positions';
   const all = eventsFor(data.events, mode, inPositions ? 'all' : filter).filter(
@@ -91,14 +92,14 @@ export function Progress({ onBack }: { onBack: () => void }) {
         </div>
         <div className="tile">
           <span className="stat-label">Practised</span>
-          <b>{practiceMs >= 3600000 ? `${(practiceMs / 3600000).toFixed(1)} h` : `${Math.round(practiceMs / 60000)} min`}</b>
+          <b>{practised >= 3600000 ? `${(practised / 3600000).toFixed(1)} h` : `${Math.floor(practised / 60000)} min`}</b>
           <span className="muted small">{data.events.length} notes answered</span>
         </div>
         <div className="tile">
           <span className="stat-label">Level {level.level}</span>
-          <b>{data.xp} XP</b>
-          <span className="muted small">
-            {level.need - level.into} XP to level {level.level + 1}
+          <b>{points.total} points</b>
+          <span className="muted small" title="One point per minute practised, one per Solid item and two per Instant item in every exercise">
+            {points.time} time + {points.knowledge} status · {level.need - level.into} to level {level.level + 1}
           </span>
         </div>
       </section>

@@ -6,6 +6,8 @@ import {
   dayKey,
   normaliseProgress,
   normaliseSettings,
+  practiceByDay,
+  practiceMs,
   type AnswerEvent,
   type DayStat,
   type ItemStat,
@@ -20,9 +22,11 @@ import {
 // Merging progress from two browsers
 //
 // The answer log is the source of truth: two logs are combined by taking every answer that is
-// in either one, once. Counters (per-item statistics, per-day totals, XP) are then worked out
-// again from the combined log, so nothing is lost and nothing is counted twice. Merging the
-// same data a second time changes nothing.
+// in either one, once. Counters (per-item statistics, per-day totals and practice time) are then
+// worked out again from the combined log, so nothing is lost and nothing is counted twice.
+// Merging the same data a second time changes nothing. Points and levels follow from the
+// statistics and the practice time, so two merged browsers show what one browser with the
+// combined log would show.
 //
 // Some history is not in the log (progress carried over from version 1, or answers beyond the
 // log's size limit). Each side's "more than its log explains" remainder is kept, taking the
@@ -52,21 +56,16 @@ function cutoff(resets: Resets | undefined, mode: Mode): number {
   return Math.max(resets?.[mode] ?? 0, resets?.all ?? 0);
 }
 
-/** XP is not in the log (it depends on the combo), so a rebuilt day uses a typical value. */
-const estimateXp = (e: AnswerEvent) => (e.ok ? 15 : 2);
-
 function daysFromEvents(events: AnswerEvent[]): Record<string, DayStat> {
   const days: Record<string, DayStat> = {};
+  const time = practiceByDay(events);
   for (const e of events) {
-    const day = (days[dayKey(e.t)] ??= { answers: 0, correct: 0, xp: 0 });
+    const day = (days[dayKey(e.t)] ??= { answers: 0, correct: 0, xp: 0, ms: time[dayKey(e.t)] ?? 0 });
     day.answers++;
     day.correct += e.ok;
-    day.xp += estimateXp(e);
   }
   return days;
 }
-
-const sumXp = (days: Record<string, DayStat>) => Object.values(days).reduce((sum, d) => sum + d.xp, 0);
 
 /** Drops what a reset (made here or in another browser) erased. */
 function applyResets(side: ProgressData, resets: Resets | undefined): ProgressData {
@@ -85,11 +84,11 @@ function applyResets(side: ProgressData, resets: Resets | undefined): ProgressDa
     }
   }
   const sessions = side.sessions.filter((s) => s.t > cutoff(resets, s.mode));
-  // "Reset everything" also clears XP and the day totals. A browser that has not seen that
-  // reset yet keeps only what it did afterwards.
+  // "Reset everything" also clears the day totals. A browser that has not seen that reset yet
+  // keeps only what it did afterwards.
   const missedFullReset = (resets.all ?? 0) > (side.resets?.all ?? 0);
   const days = missedFullReset ? daysFromEvents(events) : side.days;
-  return { ...side, events, stats, sessions, days, xp: missedFullReset ? sumXp(days) : side.xp };
+  return { ...side, events, stats, sessions, days, xp: missedFullReset ? 0 : side.xp };
 }
 
 function groupEvents<K>(events: AnswerEvent[], keyOf: (e: AnswerEvent) => K): Map<K, AnswerEvent[]> {
@@ -122,25 +121,34 @@ function mergeStat(a: ItemStat | undefined, b: ItemStat | undefined, evA: Answer
   return shape ? { ...shape, seen, correct } : undefined;
 }
 
-function mergeDay(a: DayStat | undefined, b: DayStat | undefined, evA: AnswerEvent[], evB: AnswerEvent[], merged: AnswerEvent[]): DayStat {
-  const answers = merged.length + Math.max(0, (a?.answers ?? 0) - evA.length, (b?.answers ?? 0) - evB.length);
-  const correct = okCount(merged) + Math.max(0, (a?.correct ?? 0) - okCount(evA), (b?.correct ?? 0) - okCount(evB));
-  const onlyA = merged.length - evB.length;
-  const onlyB = merged.length - evA.length;
-  const xpA = a?.xp ?? 0;
-  const xpB = b?.xp ?? 0;
-  let xp: number;
-  if (onlyA === 0 || onlyB === 0) {
-    // One side has everything the other has, so its XP already includes the other's.
-    xp = Math.max(xpA, xpB);
-  } else {
-    // Both practised separately that day: the larger side's XP plus the share of the other
-    // side's XP that belongs to answers the larger side does not have.
-    const aIsBase = (a?.answers ?? 0) >= (b?.answers ?? 0);
-    const [base, other, otherOnly] = aIsBase ? [xpA, b, onlyB] : [xpB, a, onlyA];
-    xp = base + Math.round(((other?.xp ?? 0) * otherOnly) / Math.max(1, other?.answers ?? 0));
-  }
-  return { answers, correct, xp };
+/** One side of a day: its stored totals and what its own log says about that day. */
+interface DaySide {
+  stat: DayStat | undefined;
+  events: AnswerEvent[];
+  /** Practice time that day according to this side's log. */
+  logMs: number;
+  /**
+   * Practice time that day which this side's log lost to the log limit and the merged log has
+   * again (the other side still holds those answers). It must not be counted a second time.
+   */
+  recoveredMs: number;
+}
+
+/**
+ * Totals of one day. Each is what the merged log says, plus whatever a side holds beyond its
+ * own log (answers past the log limit, or of an exercise that was reset since).
+ */
+function mergeDay(a: DaySide, b: DaySide, merged: AnswerEvent[], mergedMs: number): DayStat {
+  const extra = (pick: (stat: DayStat) => number | undefined, logged: (side: DaySide) => number) =>
+    Math.max(0, ...[a, b].map((side) => ((side.stat && pick(side.stat)) ?? logged(side)) - logged(side)));
+  // (For the time, `logged` also covers what the other side's log gives back; see recoveredMs.)
+  return {
+    answers: merged.length + extra((d) => d.answers, (side) => side.events.length),
+    correct: okCount(merged) + extra((d) => d.correct, (side) => okCount(side.events)),
+    // Unused since points replaced XP; carried along for older builds.
+    xp: Math.max(a.stat?.xp ?? 0, b.stat?.xp ?? 0),
+    ms: mergedMs + extra((d) => d.ms, (side) => side.logMs + side.recoveredMs),
+  };
 }
 
 /**
@@ -172,11 +180,29 @@ export function mergeProgress(local: ProgressData, incoming: ProgressData): Prog
 
   const dayOf = (e: AnswerEvent) => dayKey(e.t);
   const [daysA, daysB, daysAll] = [groupEvents(a.events, dayOf), groupEvents(b.events, dayOf), groupEvents(all, dayOf)];
+  const [timeA, timeB, timeAll] = [practiceByDay(a.events), practiceByDay(b.events), practiceByDay(all)];
+  // A full log has dropped its oldest answers but still counts their time in the day totals.
+  // Where the merged log reaches further back than such a log, that older stretch is the same
+  // practice, already counted.
+  const recovered = (side: ProgressData): Record<string, number> => {
+    if (side.events.length < MAX_EVENTS) return {};
+    const oldest = side.events[0].t;
+    if (all[0].t >= oldest) return {};
+    const since = practiceByDay(all.filter((e) => e.t >= oldest));
+    return Object.fromEntries(Object.entries(timeAll).map(([day, ms]) => [day, ms - (since[day] ?? 0)]));
+  };
+  const [backA, backB] = [recovered(a), recovered(b)];
   const days: Record<string, DayStat> = {};
   for (const day of [...new Set([...Object.keys(a.days), ...Object.keys(b.days), ...daysAll.keys()])].sort()) {
-    days[day] = mergeDay(a.days[day], b.days[day], daysA.get(day) ?? [], daysB.get(day) ?? [], daysAll.get(day) ?? []);
+    days[day] = mergeDay(
+      { stat: a.days[day], events: daysA.get(day) ?? [], logMs: timeA[day] ?? 0, recoveredMs: backA[day] ?? 0 },
+      { stat: b.days[day], events: daysB.get(day) ?? [], logMs: timeB[day] ?? 0, recoveredMs: backB[day] ?? 0 },
+      daysAll.get(day) ?? [],
+      timeAll[day] ?? 0,
+    );
   }
-  const xp = sumXp(days) + Math.max(0, a.xp - sumXp(a.days), b.xp - sumXp(b.days));
+  // Unused since points replaced XP; carried along for older builds.
+  const xp = Math.max(a.xp, b.xp);
 
   const sessions = new Map<string, SessionRecord>();
   for (const s of [...a.sessions, ...b.sessions]) if (!sessions.has(`${s.t}|${s.mode}`)) sessions.set(`${s.t}|${s.mode}`, s);
@@ -224,5 +250,5 @@ export function fingerprint(data: ProgressData): string {
     .sort(([x], [y]) => (x < y ? -1 : 1))
     .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
     .join(';');
-  return [data.events.length, last ? eventId(last) : '', data.xp, data.sessions.length, items, Object.keys(data.days).length, resets, settings].join('/');
+  return [data.events.length, last ? eventId(last) : '', practiceMs(data), data.sessions.length, items, Object.keys(data.days).length, resets, settings].join('/');
 }
