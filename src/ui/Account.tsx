@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { sync, type SyncState } from '../sync/sync';
+import { Brand } from './Brand';
 import { useSync } from './hooks';
 
 function ago(t: number, now: number): string {
@@ -71,10 +72,7 @@ export function Account({ onBack }: { onBack: () => void }) {
   return (
     <main className="page">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          Account and sync
-        </div>
+        <Brand onHome={onBack} title="Account and sync" />
         <button className="ghost" onClick={onBack}>
           Back to practice
         </button>

@@ -1,13 +1,15 @@
 import { DAILY_GOAL, dayKey, levelInfo, progressStore, streakOf, type Mode, type PositionHelp } from '../game/progress';
+import { enabledPositions, positionRoundSize } from '../game/scheduler';
 import { SCALES, SCALE_IDS, STRING_NAMES, buildScale, parseNote, positionsOf } from '../music/theory';
 import { positionFrets } from './Game';
 import { syncStatus } from './Account';
+import { Brand } from './Brand';
 import { useMicState, useProgress, useSync } from './hooks';
 import { MasteryMap, PositionGrid } from './MasteryMap';
 
 const MODES: { id: Mode; title: string; blurb: string }[] = [
   { id: 'notes', title: 'Note finder', blurb: '“Play C on the G string.” Random notes, weighted toward the ones you are slow on.' },
-  { id: 'positions', title: 'Scale positions', blurb: '“G major, position 2: play the 5th.” Every degree of one box in random order, then the next box.' },
+  { id: 'positions', title: 'Scale positions', blurb: '“G major, position 2: play the 5th.” Every degree of one box in random order, then the next box, round and round.' },
   { id: 'sweep', title: 'String sweep', blurb: 'One note on every string, low to high. The classic “find every C” drill.' },
 ];
 
@@ -39,6 +41,8 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
   const set = progressStore.updateSettings;
   const inPositions = settings.mode === 'positions';
   const boxes = positionsOf(scale);
+  const selectedBoxes = enabledPositions(settings).length;
+  const positionRound = positionRoundSize(settings.length, scale.notes.length, selectedBoxes);
   const togglePosition = (p: number) => {
     const positions = settings.positions.map((on, i) => (i === p ? !on : on));
     if (positions.some(Boolean)) set({ positions });
@@ -52,10 +56,7 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
   return (
     <main className="page">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          Fretsense
-        </div>
+        <Brand onHome={() => window.scrollTo({ top: 0 })} />
         <div className="stats">
           <div className="stat" title={`${level.into} of ${level.need} XP to the next level`}>
             <span className="stat-label">Level {level.level}</span>
@@ -73,18 +74,19 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
               {Math.min(today, 999)} / {DAILY_GOAL}
             </b>
           </div>
+          <button className="ghost" onClick={onProgress} title="Progress and timing">
+            Progress
+          </button>
+          <div className="stat account">
+            <button className="link" onClick={onAccount}>
+              {syncState.user ? 'Account' : syncState.available ? 'Sign in to sync' : 'About your data'}
+            </button>
+            <span className={status.tone === 'off' ? 'warn small' : 'muted small'} role="status" title={status.text}>
+              {syncState.user ? status.text : 'Stored in this browser only'}
+            </span>
+          </div>
         </div>
       </header>
-
-      <section className="panel">
-        {settings.mode === 'positions' ? <PositionGrid data={data} scaleId={settings.scaleId} /> : <MasteryMap data={data} mode={settings.mode} />}
-        <div className="panel-foot">
-          <span className="muted small">Each exercise keeps its own status. This is the one for the exercise selected below.</span>
-          <button className="ghost" onClick={onProgress}>
-            Progress and timing
-          </button>
-        </div>
-      </section>
 
       <section className="panel">
         <h2>Practice</h2>
@@ -171,6 +173,24 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
                   ))}
                 </div>
               </div>
+              <div className="option">
+                <span className="option-label">Round length</span>
+                <div className="chips">
+                  {[10, 20, 40].map((n) => (
+                    <button key={n} className={settings.length === n ? 'chip chip-on' : 'chip'} aria-pressed={settings.length === n} onClick={() => set({ length: n })}>
+                      {n} notes
+                    </button>
+                  ))}
+                </div>
+                <p className="muted small">
+                  {positionRound.questions} questions: {positionRound.passes} {positionRound.passes === 1 ? 'pass' : 'passes'} of {scale.notes.length} degrees
+                  {positionRound.passes > selectedBoxes
+                    ? `, going round the selected ${selectedBoxes === 1 ? 'box' : 'boxes'} again in a new order.`
+                    : selectedBoxes > 1
+                      ? ', every selected box once.'
+                      : '.'}
+                </p>
+              </div>
             </>
           ) : (
             <>
@@ -230,13 +250,14 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
         {micState.message && <p className="warn">{micState.message}</p>}
       </section>
 
-      <footer className="sync-line">
-        <span className={status.tone === 'off' ? 'warn small' : 'muted small'} role="status">
-          {status.text}
-        </span>
-        <button className="link small" onClick={onAccount}>
-          {syncState.user ? 'Account' : syncState.available ? 'Sign in to sync' : 'About your data'}
-        </button>
+      <section className="panel">
+        {settings.mode === 'positions' ? <PositionGrid data={data} scaleId={settings.scaleId} /> : <MasteryMap data={data} mode={settings.mode} />}
+        <p className="muted small panel-foot">Each exercise keeps its own status. This is the one for the exercise selected above.</p>
+      </section>
+
+      <footer className="app-foot muted small">
+        Fretsense {__APP_VERSION__}
+        {__APP_COMMIT__ && ` · ${__APP_COMMIT__}`}
       </footer>
     </main>
   );

@@ -11,13 +11,20 @@ import {
 import { SCALES, STRING_NAMES, degreeOrdinal, fretMidi, pcName, pcOf, type ScaleId } from '../music/theory';
 import { Fretboard } from './Fretboard';
 
+/**
+ * Status colours, a traffic light: Shaky red, Learning orange, Solid yellow, Instant green.
+ * `ink` is the same colour for text on the dark background (status names in lists).
+ */
 export const MASTERY_COLORS = [
-  { fill: '#232730', text: '#7f8798' },
-  { fill: '#8f3d3d', text: '#ffe6e3' },
-  { fill: '#a96f27', text: '#fff2de' },
-  { fill: '#3c8a59', text: '#e8fff1' },
-  { fill: '#f2c94c', text: '#2b2305' },
+  { fill: '#232730', text: '#7f8798', ink: '#929aab' },
+  { fill: '#8f3d3d', text: '#ffe6e3', ink: '#ee7b70' },
+  { fill: '#c4651c', text: '#fff2de', ink: '#f0944a' },
+  { fill: '#e2c93a', text: '#2b2305', ink: '#ecd655' },
+  { fill: '#3c9a5f', text: '#e8fff1', ink: '#5fc488' },
 ];
+
+/** The app's accent (selected chips, answer and root dots). Kept apart from the status colours. */
+export const ACCENT = { fill: '#a99bff', text: '#14103a' };
 
 export type MapView = 'status' | 'time';
 
@@ -32,10 +39,11 @@ export function timeColor(ms: number): { fill: string; text: string } {
 
 function styleFor(stat: ItemStat | undefined, view: MapView, name: string) {
   if (view === 'time') {
-    if (!stat || !stat.ms) return { ...MASTERY_COLORS[0], label: name };
+    if (!stat || !stat.ms) return { fill: MASTERY_COLORS[0].fill, text: MASTERY_COLORS[0].text, label: name };
     return { ...timeColor(stat.ms), label: seconds(stat.ms) };
   }
-  return { ...MASTERY_COLORS[levelOf(stat)], label: name };
+  const { fill, text } = MASTERY_COLORS[levelOf(stat)];
+  return { fill, text, label: name };
 }
 
 export function Legend({ counts, view }: { counts?: number[]; view: MapView }) {

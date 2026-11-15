@@ -4,6 +4,7 @@ import { DAILY_GOAL, MODES, MODE_TITLES, dayKey, levelInfo, progressStore, strea
 import { SCALES, SCALE_IDS, STRING_NAMES, degreeOrdinal, pcName, type ScaleId } from '../music/theory';
 import { importProgress, looksLikeProgress, toSyncDoc } from '../sync/merge';
 import { sync } from '../sync/sync';
+import { Brand } from './Brand';
 import { useProgress } from './hooks';
 import { MasteryMap, PositionGrid, type MapView } from './MasteryMap';
 
@@ -67,10 +68,7 @@ export function Progress({ onBack }: { onBack: () => void }) {
   return (
     <main className="page">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          Progress
-        </div>
+        <Brand onHome={onBack} title="Progress" />
         <button className="ghost" onClick={onBack}>
           Back to practice
         </button>

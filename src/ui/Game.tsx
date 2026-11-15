@@ -5,7 +5,9 @@ import { Scheduler } from '../game/scheduler';
 import { REVEAL_AFTER_MS, Session, type AnswerResult } from '../game/session';
 import { POSITION_MAX_FRET, STRING_NAMES, STRING_NUMBERS, midiName, pcName, pcOf, type ScalePosition } from '../music/theory';
 import { Fretboard, type CellStyle } from './Fretboard';
+import { Brand } from './Brand';
 import { levelToUnit, useFrame, useMicState } from './hooks';
+import { ACCENT } from './MasteryMap';
 
 export interface RoundSummary {
   mode: Mode;
@@ -113,8 +115,8 @@ export function Game({ onDone, onQuit }: Props) {
   const ok = run.phase === 'feedback' && !!run.lastResult?.firstTry;
   const answerStyle = (label: string): CellStyle => ({
     shape: 'dot',
-    fill: ok ? '#4fb477' : '#f2c94c',
-    text: ok ? '#04170b' : '#2b2305',
+    fill: ok ? '#4fb477' : ACCENT.fill,
+    text: ok ? '#04170b' : ACCENT.text,
     label,
   });
   const quiet = (label: string | undefined, root: boolean): CellStyle => ({
@@ -132,7 +134,7 @@ export function Game({ onDone, onQuit }: Props) {
       if (!here) return null;
       const root = here.degree === '1';
       if (showAnswer) return here.degree === q.degree ? answerStyle(here.degree) : quiet(here.degree, root);
-      if (intro) return root ? { shape: 'dot', fill: '#f2c94c', text: '#2b2305', label: '1' } : null;
+      if (intro) return root ? { shape: 'dot', ...ACCENT, label: '1' } : null;
       if (session.help === 'shape') return quiet(root ? '1' : undefined, root);
       if (session.help === 'roots') return root ? quiet('1', true) : null;
       return null;
@@ -149,6 +151,8 @@ export function Game({ onDone, onQuit }: Props) {
   return (
     <main className="page game">
       <header className="game-bar">
+        {/* Leaving by the logo is the same as Quit: answers so far are already recorded. */}
+        <Brand onHome={onQuit} />
         <button className="ghost" onClick={onQuit}>
           Quit
         </button>

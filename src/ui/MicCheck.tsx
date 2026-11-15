@@ -1,6 +1,7 @@
 import { mic } from '../audio/mic';
 import { progressStore, type Sensitivity } from '../game/progress';
 import { STRING_NAMES, STRING_OPEN_MIDI, midiName } from '../music/theory';
+import { Brand } from './Brand';
 import { levelToUnit, useFrame, useMicState, useProgress } from './hooks';
 
 const DEBUG = new URLSearchParams(location.search).has('debug');
@@ -19,10 +20,7 @@ export function MicCheck({ onBack }: { onBack: () => void }) {
   return (
     <main className="page">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          Mic check and tuner
-        </div>
+        <Brand onHome={onBack} title="Mic check and tuner" />
         <button className="ghost" onClick={onBack}>
           Back
         </button>

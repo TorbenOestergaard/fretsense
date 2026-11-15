@@ -118,6 +118,15 @@ function pickWeighted<T>(items: T[], weights: number[], rng: () => number): T {
   return items[items.length - 1];
 }
 
+/**
+ * Size of a Scale positions round: the chosen length rounded to whole boxes, with every selected
+ * box visited at least once.
+ */
+export function positionRoundSize(length: number, degrees: number, boxes: number): { passes: number; questions: number } {
+  const passes = Math.max(boxes, Math.round(length / degrees));
+  return { passes, questions: passes * degrees };
+}
+
 const RECENT_WINDOW = 3;
 const RETRY_GAP = 3;
 
@@ -163,8 +172,7 @@ export class Scheduler {
    * the round keeps cycling through them.
    */
   private boxPasses(): number {
-    const degrees = this.scale?.notes.length ?? 1;
-    return Math.max(this.boxes.length, Math.round(this.settings.length / degrees));
+    return positionRoundSize(this.settings.length, this.scale?.notes.length ?? 1, this.boxes.length).passes;
   }
 
   /** Queues every degree of the next box in a fresh random order. */

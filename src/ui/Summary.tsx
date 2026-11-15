@@ -1,7 +1,8 @@
 import { MASTERY_LABELS, MODE_TITLES, levelInfo } from '../game/progress';
 import type { RoundSummary } from './Game';
+import { Brand } from './Brand';
 import { useProgress } from './hooks';
-import { MasteryMap, PositionGrid } from './MasteryMap';
+import { MASTERY_COLORS, MasteryMap, PositionGrid } from './MasteryMap';
 
 interface Props {
   summary: RoundSummary;
@@ -39,10 +40,7 @@ export function Summary({ summary, onAgain, onHome }: Props) {
   return (
     <main className="page">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          Round complete
-        </div>
+        <Brand onHome={onHome} title="Round complete" />
         <span className="muted">
           {MODE_TITLES[summary.mode]}
           {summary.context ? ` · ${summary.context}` : ''}
@@ -84,7 +82,8 @@ export function Summary({ summary, onAgain, onHome }: Props) {
                 <li key={c.key}>
                   {c.label}{' '}
                   <span className="muted">
-                    {MASTERY_LABELS[c.before]} → <span className="good">{MASTERY_LABELS[c.after]}</span>
+                    <span style={{ color: MASTERY_COLORS[c.before].ink }}>{MASTERY_LABELS[c.before]}</span> →{' '}
+                    <b style={{ color: MASTERY_COLORS[c.after].ink }}>{MASTERY_LABELS[c.after]}</b>
                   </span>
                 </li>
               ))}
