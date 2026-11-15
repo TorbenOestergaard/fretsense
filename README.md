@@ -37,7 +37,11 @@ long-unseen notes are asked more often, and a missed note returns three question
 minor, major or minor pentatonic). A box starts with an untimed step, *play the root*, to get
 your hand in place. Then every degree of the scale is asked once in random order, and any place
 that degree occurs inside the box counts. A missed degree is asked again before the box is
-left. Then the next box. It tracks *this degree in this box of this scale type*, independent of
+left. Then the next selected box, and round again with the degrees in a new order, until the
+round length is reached. The length is rounded to whole boxes and every selected box is
+visited at least once: with one box of a major scale and "20 notes" that is three passes of
+seven degrees, and with all five boxes a round is never shorter than 35. The root step is only
+shown when the box changes, so repeating a single box asks for it once. It tracks *this degree in this box of this scale type*, independent of
 key. Minor boxes are numbered from the one with the root under the first finger on the low E
 string. You choose what the board shows while asking: the scale shape, the roots only, or
 nothing.
@@ -51,20 +55,21 @@ A note only counts as known when it is both right and fast, because "working it 
 low E string" is the habit to replace with recall. Each attempt scores 0 for a miss, or between
 0 and 1 by speed for a first-try answer (2 s or faster is full marks, 8 s or slower is none).
 
-The status of an item (New, Shaky, Learning, Solid, Instant) is the average of its last eight
+The status of an item (New, Shaky, Learning, Solid, Instant; shown as a traffic light: red,
+orange, yellow, green) is the average of its last eight
 attempts, and fewer than four attempts are averaged as if the missing ones scored zero. That
 damps it in both directions: one lucky fast answer makes a note Shaky, not Instant, and it takes
 four to get there; one slip or slow answer on a well-known note leaves it Instant, two drop it
 to Solid.
 
-The **Progress** view shows, per exercise: the status map, the same map coloured by average
+The **Progress** view (top right of the home screen) shows, per exercise: the status map, the same map coloured by average
 time, average time per string, note and fret (or per position and degree), and average time
 and first-try rate per practice day. The timing charts can be limited to naturals or to sharps
 and flats, so days with harder material do not look like a step back. A stamina chart shows
 correct notes per day against the daily goal of 40, across all exercises.
 
 Suggested routine: 5–10 minutes a day. Start with naturals only on the D, G and B strings in the
-Note finder, switch on sharps and flats once those rows turn green, and add a Scale positions
+Note finder, switch on sharps and flats once those rows turn yellow and green, and add a Scale positions
 round in the key you are currently playing in.
 
 ## How the listening works
@@ -157,7 +162,7 @@ Progress is stored in the browser's localStorage. That copy is always the master
 fully without an account and without a network. Each browser and each address (`localhost:5183`,
 the deployed site) has its own copy.
 
-**Sync is optional.** Open *Sign in to sync* at the bottom of the home screen and create an
+**Sync is optional.** Open *Sign in to sync* at the top right of the home screen and create an
 account (email and password). From then on:
 
 - Signing in downloads the copy on the server, merges it with what is in the browser, and
@@ -166,7 +171,7 @@ account (email and password). From then on:
 - After that the app syncs when it loads, shortly after each finished round, and when the page
   is hidden or closed.
 - If the server cannot be reached (offline, or the free backend is paused), practice carries
-  on and the status line says "Sync off" with the time of the last sync. It catches up on the
+  on and the status under the account link says "Sync off" with the time of the last sync. It catches up on the
   next successful sync.
 - A reset is synced too: resetting an exercise in one browser resets it in the others.
 
@@ -231,6 +236,9 @@ pull, push, delete account) and return it from `src/sync/backend.ts`. The stored
 `SyncDoc` type in `src/sync/merge.ts`; any store that keeps one JSON document per user will do.
 
 ## Deploying
+
+The footer of the home screen shows the version from `package.json` and, when git is available
+at build time, the short commit hash (`build-info.js`, passed in through Vite's `define`).
 
 The app is a static site. `.github/workflows/deploy.yml` tests, builds and publishes it to
 GitHub Pages on every push to `main`. Pages serves over HTTPS, which browsers require for
