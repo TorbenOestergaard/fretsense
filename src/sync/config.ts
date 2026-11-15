@@ -2,8 +2,8 @@
 // browser needs them to reach the backend, and access is controlled by sign-in and by the
 // table permissions on the server. Leave the subdomain empty to build the app without sync.
 export const NHOST = {
-  subdomain: '',
-  region: 'eu-central-1',
+  subdomain: 'srbjdkzpajmqbsqejnlp',
+  region: 'eu-north-1',
   /** Shown to the user in the account section. */
-  label: 'Nhost, Frankfurt',
+  label: 'Nhost, Stockholm',
 };

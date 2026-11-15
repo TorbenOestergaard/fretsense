@@ -37,6 +37,9 @@ function toSyncError(err: unknown): SyncError {
     if (code === 'invalid-refresh-token' || err.status === 401) return new SyncError('signed-out', 'You have been signed out. Sign in again to sync.');
     // Status 0 or a gateway error is what a paused or unreachable project looks like.
     if (!err.status || err.status >= 502) return new SyncError('unreachable', 'The sync server cannot be reached.');
+    if (body?.errors?.[0]?.message?.includes("not found in type")) {
+      return new SyncError('server', 'the progress table is not set up on the sync server yet (or this account has no permission to use it).');
+    }
     return new SyncError('server', body?.message ?? body?.errors?.[0]?.message ?? `The sync server answered with an error (${err.status}).`);
   }
   return new SyncError('unreachable', 'The sync server cannot be reached.');
