@@ -149,7 +149,18 @@ src/game/session.ts     one round as a state machine
 src/ui/                 React screens
 ```
 
-Progress is stored in the browser's localStorage for `localhost:5183`.
+Progress is stored in the browser's localStorage, per address: practice on `localhost:5183` and
+practice on the deployed site are kept separately, and so is each browser.
+
+## Deploying
+
+The app is a static site. `.github/workflows/deploy.yml` tests, builds and publishes it to
+GitHub Pages on every push to `main`. Pages serves over HTTPS, which browsers require for
+microphone access.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
 
 ## Ideas for later
 
