@@ -223,7 +223,7 @@ describe('scheduler', () => {
 
   it('practises only the chosen positions and repeats a missed degree before leaving the box', () => {
     const scheduler = new Scheduler(
-      settings({ mode: 'positions', tonic: 'A', scaleId: 'minorPent', positions: [true, true, false, false, false] }),
+      settings({ mode: 'positions', tonic: 'A', scaleId: 'minorPent', length: 10, positions: [true, true, false, false, false] }),
       () => undefined,
       seededRng(5),
       () => NOW,
@@ -236,6 +236,58 @@ describe('scheduler', () => {
     expect(rest.slice(0, 5).every((q) => q.position!.index === 0)).toBe(true);
     expect(rest[4].key).toBe(first.key);
     expect(rest.slice(5).every((q) => q.position!.index === 1)).toBe(true);
+  });
+
+  it('keeps cycling through one selected box until the round length is reached', () => {
+    const scheduler = new Scheduler(
+      settings({ mode: 'positions', tonic: 'G', scaleId: 'major', length: 20, positions: [false, true, false, false, false] }),
+      () => undefined,
+      seededRng(4),
+      () => NOW,
+    );
+    expect(scheduler.roundLength()).toBe(21); // three passes of seven degrees
+    const asked = Array.from({ length: 21 }, () => scheduler.next());
+    expect(asked.every((q) => q.position!.index === 1)).toBe(true);
+    const passes = [0, 1, 2].map((i) => asked.slice(i * 7, i * 7 + 7).map((q) => q.degree));
+    for (const pass of passes) expect([...pass].sort()).toEqual(['1', '2', '3', '4', '5', '6', '7']);
+    expect(passes[1]).not.toEqual(passes[0]); // reshuffled
+    for (let i = 1; i < asked.length; i++) expect(asked[i].degree).not.toBe(asked[i - 1].degree);
+  });
+
+  it('rounds the round to whole boxes and visits every selected box at least once', () => {
+    const lengthOf = (patch: Partial<Settings>) => new Scheduler(settings({ mode: 'positions', tonic: 'A', ...patch }), () => undefined, seededRng(), () => NOW).roundLength();
+    const one = [true, false, false, false, false];
+    expect(lengthOf({ scaleId: 'minorPent', length: 10, positions: one })).toBe(10);
+    expect(lengthOf({ scaleId: 'minorPent', length: 40, positions: one })).toBe(40);
+    expect(lengthOf({ scaleId: 'major', length: 10, positions: one })).toBe(7);
+    expect(lengthOf({ scaleId: 'major', length: 40, positions: one })).toBe(42);
+    // All five boxes are never cut short by a small round length.
+    expect(lengthOf({ scaleId: 'major', length: 10 })).toBe(35);
+
+    const scheduler = new Scheduler(
+      settings({ mode: 'positions', tonic: 'A', scaleId: 'minorPent', length: 20, positions: [true, false, true, false, false] }),
+      () => undefined,
+      seededRng(),
+      () => NOW,
+    );
+    const boxes = Array.from({ length: 20 }, () => scheduler.next().position!.index);
+    expect(boxes).toEqual([0, 2, 0, 2].flatMap((p) => new Array(5).fill(p)));
+  });
+
+  it('asks a degree missed in a later pass again before that pass ends', () => {
+    const scheduler = new Scheduler(
+      settings({ mode: 'positions', tonic: 'A', scaleId: 'minorPent', length: 10, positions: [true, false, false, false, false] }),
+      () => undefined,
+      seededRng(6),
+      () => NOW,
+    );
+    const firstPass = Array.from({ length: 5 }, () => scheduler.next());
+    expect(scheduler.requeue(firstPass[4])).toBe(true);
+    expect(scheduler.next().key).toBe(firstPass[4].key);
+    const second = scheduler.next();
+    expect(scheduler.requeue(second)).toBe(true); // a new pass may repeat a miss again
+    const rest = Array.from({ length: 5 }, () => scheduler.next());
+    expect(rest[4].key).toBe(second.key);
   });
 
   it('sweeps one note across the strings from low to high', () => {
@@ -357,9 +409,31 @@ describe('session', () => {
     expect(s.phase).toBe('asking');
   });
 
+  it('shows the root step once when the same box is repeated, and again when the box changes', () => {
+    const play = (patch: Partial<Settings>) => {
+      const scheduler = new Scheduler(settings({ mode: 'positions', tonic: 'G', scaleId: 'majorPent', length: 20, ...patch }), () => undefined, seededRng(2), () => NOW);
+      const s = new Session(scheduler, scheduler.roundLength(), 0);
+      const intros: number[] = [];
+      let t = 0;
+      while (s.phase !== 'done') {
+        if (s.phase === 'intro') {
+          intros.push(s.index);
+          s.skip(t);
+        }
+        t += 2000;
+        s.noteOn(s.question.targets[0], t);
+        t += FEEDBACK_OK_MS;
+        s.tick(t);
+      }
+      return { intros, answered: s.results.length };
+    };
+    expect(play({ positions: [true, false, false, false, false] })).toEqual({ intros: [0], answered: 20 });
+    expect(play({ positions: [true, true, false, false, false] })).toEqual({ intros: [0, 5, 10, 15], answered: 20 });
+  });
+
   it('accepts a degree anywhere in the box, nudges outside it, and extends the round after a miss', () => {
     const scheduler = new Scheduler(
-      settings({ mode: 'positions', tonic: 'G', scaleId: 'major', positions: [true, false, false, false, false] }),
+      settings({ mode: 'positions', tonic: 'G', scaleId: 'major', length: 10, positions: [true, false, false, false, false] }),
       () => undefined,
       seededRng(2),
       () => NOW,

@@ -127,7 +127,8 @@ const RETRY_GAP = 3;
  *   repetition), and an item you missed comes back a few questions later.
  * - String sweep: one note across the strings, low to high (the classic "find every C" drill).
  * - Scale positions: one box at a time; every degree of the scale once, in random order, then
- *   the next box. A missed degree is asked again before the box is left.
+ *   the next selected box, cycling (with a fresh order each pass) until the round length is
+ *   reached. A missed degree is asked again before the box is left.
  */
 export class Scheduler {
   private recent: string[] = [];
@@ -136,6 +137,10 @@ export class Scheduler {
   private queue: PoolItem[] = [];
   private lastSweepPc = -1;
   private retried = new Set<string>();
+  /** Scale positions: the selected boxes, and how many box passes have been queued so far. */
+  private readonly boxes: number[];
+  private boxPass = 0;
+  private lastItem: PoolItem | null = null;
   readonly scale: Scale | null;
   readonly positions: ScalePosition[];
   private readonly pool: PoolItem[];
@@ -149,24 +154,40 @@ export class Scheduler {
     this.scale = settings.mode === 'positions' ? buildScale(settings.tonic, settings.scaleId) : null;
     this.positions = this.scale ? positionsOf(this.scale) : [];
     this.pool = this.scale ? [] : buildPool(settings);
-    if (this.scale) {
-      for (const p of enabledPositions(settings)) {
-        const degrees = this.scale.notes.map((n) => n.degree);
-        for (let i = degrees.length - 1; i > 0; i--) {
-          const j = Math.floor(this.rng() * (i + 1));
-          [degrees[i], degrees[j]] = [degrees[j], degrees[i]];
-        }
-        for (const degree of degrees) {
-          const pc = this.scale.notes.find((n) => n.degree === degree)!.pc;
-          this.queue.push({ string: null, pc, degree, position: this.positions[p] });
-        }
-      }
+    this.boxes = this.scale ? enabledPositions(settings) : [];
+  }
+
+  /**
+   * How many boxes a Scale positions round walks through. The round length is rounded to whole
+   * boxes, and every selected box is visited at least once. With fewer boxes selected than that,
+   * the round keeps cycling through them.
+   */
+  private boxPasses(): number {
+    const degrees = this.scale?.notes.length ?? 1;
+    return Math.max(this.boxes.length, Math.round(this.settings.length / degrees));
+  }
+
+  /** Queues every degree of the next box in a fresh random order. */
+  private fillBox() {
+    const scale = this.scale!;
+    const position = this.positions[this.boxes[this.boxPass % this.boxes.length]];
+    this.boxPass++;
+    const degrees = scale.notes.map((n) => n.degree);
+    for (let i = degrees.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rng() * (i + 1));
+      [degrees[i], degrees[j]] = [degrees[j], degrees[i]];
     }
+    // Staying in the same box: do not open the new pass with the degree that was just asked.
+    if (position === this.lastItem?.position && degrees[0] === this.lastItem.degree && degrees.length > 1) {
+      [degrees[0], degrees[degrees.length - 1]] = [degrees[degrees.length - 1], degrees[0]];
+    }
+    this.retried.clear();
+    this.queue = degrees.map((degree) => ({ string: null, pc: scale.notes.find((n) => n.degree === degree)!.pc, degree, position }));
   }
 
   /** Number of questions in a round, before any repeats of missed degrees. */
   roundLength(): number {
-    if (this.settings.mode === 'positions') return this.queue.length;
+    if (this.settings.mode === 'positions') return this.boxPasses() * this.scale!.notes.length;
     if (this.settings.mode === 'sweep') {
       const strings = enabledStrings(this.settings).length;
       return Math.max(1, Math.round(this.settings.length / strings)) * strings;
@@ -176,7 +197,8 @@ export class Scheduler {
 
   next(): Question {
     const mode = this.settings.mode;
-    const item = mode === 'positions' ? this.queue.shift()! : mode === 'sweep' ? this.nextSweep() : this.nextAdaptive();
+    const item = mode === 'positions' ? this.nextInBox() : mode === 'sweep' ? this.nextSweep() : this.nextAdaptive();
+    this.lastItem = item;
     this.asked++;
     const question = toQuestion(item, mode, this.scale);
     this.recent.push(question.key);
@@ -193,10 +215,8 @@ export class Scheduler {
     if (this.settings.mode === 'positions') {
       if (this.retried.has(item.key)) return false;
       this.retried.add(item.key);
-      // Ask it again as the last question of this box.
-      let at = this.queue.findIndex((q) => q.position !== item.position);
-      if (at < 0) at = this.queue.length;
-      this.queue.splice(at, 0, { string: null, pc: item.pc, degree: item.degree, position: item.position });
+      // Ask it again as the last question of this pass of the box (the queue holds one box).
+      this.queue.push({ string: null, pc: item.pc, degree: item.degree, position: item.position });
       return true;
     }
     if (this.retries.some((r) => r.item.string === item.string && r.item.pc === item.pc)) return false;
@@ -221,6 +241,11 @@ export class Scheduler {
     if (candidates.length === 0) candidates = this.pool.filter((item) => this.keyOf(item) !== last);
     if (candidates.length === 0) candidates = this.pool;
     return pickWeighted(candidates, candidates.map((item) => this.weightOf(item)), this.rng);
+  }
+
+  private nextInBox(): PoolItem {
+    if (this.queue.length === 0) this.fillBox();
+    return this.queue.shift()!;
   }
 
   private nextSweep(): PoolItem {

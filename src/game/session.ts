@@ -32,7 +32,7 @@ const MIN_REACTION_MS = 150;
 /**
  * One practice round as a small state machine, independent of audio and UI.
  *
- * intro -> (play the root, or skip) -> asking      [scale positions only, once per box]
+ * intro -> (play the root, or skip) -> asking      [scale positions only, when the box changes]
  * asking -> (correct note) -> feedback -> next question
  * asking -> (12 s or skip) -> revealed -> (play it, or skip) -> feedback -> next question
  *
@@ -41,6 +41,7 @@ const MIN_REACTION_MS = 150;
  *
  * Entering a new scale box starts with an untimed step: play the root. Getting your hand into
  * the box is not what is being measured, so the clock only runs for the degrees that follow.
+ * Another pass through the box you are already in does not repeat that step.
  */
 export class Session {
   phase: Phase = 'asking';
