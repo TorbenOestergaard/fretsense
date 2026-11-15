@@ -155,10 +155,10 @@ export function Game({ onDone, onQuit }: Props) {
   else lead = 'Play';
 
   return (
-    <main className="page game">
+    <main className="page-body game">
       <header className="game-bar">
         {/* Leaving by the logo is the same as Quit: answers so far are already recorded. */}
-        <Brand onHome={onQuit} />
+        <Brand onQuit={onQuit} />
         <button className="ghost" onClick={onQuit}>
           Quit
         </button>

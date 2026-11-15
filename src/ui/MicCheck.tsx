@@ -1,12 +1,11 @@
 import { mic } from '../audio/mic';
 import { progressStore, type Sensitivity } from '../game/progress';
 import { STRING_NAMES, STRING_OPEN_MIDI, midiName } from '../music/theory';
-import { Brand } from './Brand';
 import { levelToUnit, useFrame, useMicState, useProgress } from './hooks';
 
 const DEBUG = new URLSearchParams(location.search).has('debug');
 
-export function MicCheck({ onBack }: { onBack: () => void }) {
+export function MicCheck() {
   const state = useMicState();
   const frame = useFrame();
   const { settings } = useProgress();
@@ -18,14 +17,7 @@ export function MicCheck({ onBack }: { onBack: () => void }) {
   const inTune = midi !== null && Math.abs(cents) <= 8;
 
   return (
-    <main className="page">
-      <header className="topbar">
-        <Brand onHome={onBack} title="Mic check and tuner" />
-        <button className="ghost" onClick={onBack}>
-          Back
-        </button>
-      </header>
-
+    <main className="page-body">
       <section className="panel tuner">
         <div className={inTune ? 'tuner-note good' : 'tuner-note'}>{midi !== null ? midiName(midi) : '–'}</div>
         <div className="cents" aria-label={midi !== null ? `${Math.round(cents)} cents` : 'No note'}>

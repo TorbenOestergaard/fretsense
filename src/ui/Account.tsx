@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { sync, type SyncState } from '../sync/sync';
-import { Brand } from './Brand';
+import { hrefOf } from './route';
 import { useSync } from './hooks';
 
 function ago(t: number, now: number): string {
@@ -26,7 +26,7 @@ const keepLocal = () =>
     'This browser holds progress that was synced to a different account.\n\nOK: add it to the account you are signing in to.\nCancel: replace it with that account’s progress.',
   );
 
-export function Account({ onBack }: { onBack: () => void }) {
+export function Account() {
   const state = useSync();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -70,19 +70,12 @@ export function Account({ onBack }: { onBack: () => void }) {
   };
 
   return (
-    <main className="page">
-      <header className="topbar">
-        <Brand onHome={onBack} title="Account and sync" />
-        <button className="ghost" onClick={onBack}>
-          Back to practice
-        </button>
-      </header>
-
+    <main className="page-body">
       <section className="panel">
         {!state.available ? (
           <>
             <h2>Sync is not set up</h2>
-            <p className="muted">This copy of the app has no sync server. Your progress is stored in this browser, and you can back it up to a file from the Progress page.</p>
+            <p className="muted">This copy of the app has no sync server. Your progress is stored in this browser, and you can back it up to a file from the <a href={hrefOf('progress')}>Progress</a> page.</p>
           </>
         ) : state.user ? (
           <>

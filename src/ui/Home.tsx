@@ -1,10 +1,9 @@
-import { DAILY_GOAL, dayKey, levelInfo, noteChoice, noteFlags, pointsOf, progressStore, streakOf, type Mode, type PositionHelp } from '../game/progress';
+import { noteChoice, noteFlags, progressStore, type Mode, type PositionHelp } from '../game/progress';
 import { enabledPositions, positionRoundSize } from '../game/scheduler';
 import { SCALES, SCALE_IDS, STRING_NAMES, buildScale, parseNote, positionsOf } from '../music/theory';
 import { positionFrets } from './Game';
-import { syncStatus } from './Account';
-import { Brand } from './Brand';
-import { useMicState, useProgress, useSync } from './hooks';
+import { useMicState, useProgress } from './hooks';
+import { hrefOf } from './route';
 import { MasteryMap, PositionGrid } from './MasteryMap';
 
 const MODES: { id: Mode; title: string; blurb: string }[] = [
@@ -21,21 +20,14 @@ const HELP: { id: PositionHelp; label: string }[] = [
 
 interface Props {
   onStart: () => void;
-  onMic: () => void;
-  onProgress: () => void;
-  onAccount: () => void;
 }
 
-export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
-  const syncState = useSync();
-  const status = syncStatus(syncState, Date.now());
+export function Home({ onStart }: Props) {
   const data = useProgress();
   const micState = useMicState();
   const { settings } = data;
-  const points = pointsOf(data);
-  const level = levelInfo(points.total);
-  const today = data.days[dayKey(Date.now())]?.correct ?? 0;
-  const streak = streakOf(data.days, Date.now());
+  // Nothing answered yet in any exercise: point a first-time user at the mic check.
+  const firstTime = data.events.length === 0;
   const scaleType = SCALES[settings.scaleId];
   const tonic = scaleType.tonics.includes(settings.tonic) ? settings.tonic : scaleType.tonics[0];
   const scale = buildScale(tonic, settings.scaleId);
@@ -62,40 +54,7 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
   };
 
   return (
-    <main className="page">
-      <header className="topbar">
-        <Brand onHome={() => window.scrollTo({ top: 0 })} />
-        <div className="stats">
-          <div className="stat" title={`${points.total} points: ${points.time} for minutes practised, ${points.knowledge} for Solid and Instant items. ${level.need - level.into} more to level ${level.level + 1}.`}>
-            <span className="stat-label">Level {level.level}</span>
-            <div className="bar xp">
-              <div style={{ width: `${(level.into / level.need) * 100}%` }} />
-            </div>
-          </div>
-          <div className="stat" title={`Days in a row with ${DAILY_GOAL} correct notes`}>
-            <span className="stat-label">Streak</span>
-            <b>{streak} {streak === 1 ? 'day' : 'days'}</b>
-          </div>
-          <div className="stat" title="Correct first-try notes today">
-            <span className="stat-label">Today</span>
-            <b className={today >= DAILY_GOAL ? 'good' : ''}>
-              {Math.min(today, 999)} / {DAILY_GOAL}
-            </b>
-          </div>
-          <button className="ghost" onClick={onProgress} title="Progress and timing">
-            Progress
-          </button>
-          <div className="stat account">
-            <button className="link" onClick={onAccount}>
-              {syncState.user ? 'Account' : syncState.available ? 'Sign in to sync' : 'About your data'}
-            </button>
-            <span className={status.tone === 'off' ? 'warn small' : 'muted small'} role="status" title={status.text}>
-              {syncState.user ? status.text : 'Stored in this browser only'}
-            </span>
-          </div>
-        </div>
-      </header>
-
+    <main className="page-body">
       <section className="panel">
         <h2>Practice</h2>
         <div className="modes" role="radiogroup" aria-label="Practice mode">
@@ -246,13 +205,16 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
           <button className="primary" onClick={onStart}>
             Start round
           </button>
-          <button className="ghost" onClick={onMic}>
-            Mic check and tuner
-          </button>
           <span className="muted small">
-            {micState.status === 'running'
-              ? `Listening on ${micState.deviceLabel ?? 'microphone'}`
-              : 'Starting a round asks for microphone access.'}
+            {micState.status === 'running' ? (
+              `Listening on ${micState.deviceLabel ?? 'microphone'}`
+            ) : firstTime ? (
+              <>
+                First time? Do the <a href={hrefOf('mic')}>mic check</a> before your first round: tune up and see that all six open strings are heard.
+              </>
+            ) : (
+              'Starting a round asks for microphone access.'
+            )}
           </span>
         </div>
         {micState.message && <p className="warn">{micState.message}</p>}
@@ -262,11 +224,6 @@ export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
         {settings.mode === 'positions' ? <PositionGrid data={data} scaleId={settings.scaleId} /> : <MasteryMap data={data} mode={settings.mode} />}
         <p className="muted small panel-foot">Each exercise keeps its own status. This is the one for the exercise selected above.</p>
       </section>
-
-      <footer className="app-foot muted small">
-        Fretsense {__APP_VERSION__}
-        {__APP_COMMIT__ && ` · ${__APP_COMMIT__}`}
-      </footer>
     </main>
   );
 }

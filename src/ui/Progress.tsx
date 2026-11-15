@@ -4,7 +4,6 @@ import { DAILY_GOAL, MODE_ORDER, MODE_TITLES, dayKey, levelInfo, pointsOf, pract
 import { SCALES, SCALE_IDS, STRING_NAMES, degreeOrdinal, pcName, type ScaleId } from '../music/theory';
 import { importProgress, looksLikeProgress, toSyncDoc } from '../sync/merge';
 import { sync } from '../sync/sync';
-import { Brand } from './Brand';
 import { useProgress } from './hooks';
 import { MasteryMap, PositionGrid, type MapView } from './MasteryMap';
 
@@ -20,7 +19,7 @@ const FILTERS: { id: NoteFilter; label: string }[] = [
   { id: 'accidentals', label: 'Sharps and flats' },
 ];
 
-export function Progress({ onBack }: { onBack: () => void }) {
+export function Progress() {
   const data = useProgress();
   const [mode, setMode] = useState<Mode>(data.settings.mode);
   const [view, setView] = useState<MapView>('status');
@@ -67,14 +66,7 @@ export function Progress({ onBack }: { onBack: () => void }) {
   const overall = bucketOf(all);
 
   return (
-    <main className="page">
-      <header className="topbar">
-        <Brand onHome={onBack} title="Progress" />
-        <button className="ghost" onClick={onBack}>
-          Back to practice
-        </button>
-      </header>
-
+    <main className="page-body">
       <section className="tiles">
         <div className="tile">
           <span className="stat-label">Streak</span>

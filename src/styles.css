@@ -74,15 +74,26 @@ p {
   font-size: 14px;
 }
 
-/* Top bar */
-.topbar {
-  display: flex;
+/* Site navigation: logo, pages, practice figures, account. The same on every page outside a round. */
+a {
+  color: var(--accent);
+}
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.site-nav {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  grid-template-areas: 'brand links stats account';
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 12px 22px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
 }
 .brand {
+  grid-area: brand;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -100,15 +111,11 @@ p {
   font: inherit;
   letter-spacing: inherit;
   border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
 }
 .brand-home:hover {
   color: var(--accent);
-}
-.brand-title {
-  color: var(--muted);
-  font-weight: 500;
-  padding-left: 12px;
-  border-left: 1px solid var(--border);
 }
 .brand-mark {
   width: 22px;
@@ -121,7 +128,30 @@ p {
     var(--panel-2);
   border: 1px solid var(--border);
 }
+.nav-links {
+  grid-area: links;
+  display: flex;
+  gap: 4px;
+}
+.nav-link {
+  padding: 7px 13px;
+  border-radius: 10px;
+  color: var(--muted);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.nav-link:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.nav-link.nav-on {
+  color: var(--text);
+  background: rgba(169, 155, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(169, 155, 255, 0.45);
+}
 .stats {
+  grid-area: stats;
   display: flex;
   gap: 22px;
   align-items: center;
@@ -132,16 +162,42 @@ p {
   gap: 3px;
   min-width: 74px;
 }
-.stat.account {
-  align-items: flex-end;
-  text-align: right;
+.nav-account {
+  grid-area: account;
   min-width: 0;
+  padding: 5px 11px;
+  margin: -5px -11px -5px 0;
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+  white-space: nowrap;
 }
-.stat.account span {
-  max-width: 280px;
+.nav-account:hover {
+  background: var(--panel-2);
 }
-.stat.account .warn {
-  margin-top: 0;
+.nav-account.nav-on {
+  background: rgba(169, 155, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(169, 155, 255, 0.45);
+}
+.nav-account b {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.nav-account i {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--good);
+}
+.nav-account .sync-off i {
+  background: var(--warn);
+}
+.nav-account .sync-off {
+  color: var(--warn);
+}
+.nav-account .sync-none {
+  color: var(--accent);
 }
 .app-foot {
   text-align: center;
@@ -156,6 +212,100 @@ p {
 }
 .stat b {
   font-size: 15px;
+}
+.page-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.page-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+}
+h1 {
+  font-size: 19px;
+  font-weight: 700;
+  margin: 0;
+}
+.prose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prose p,
+.prose li {
+  max-width: 72ch;
+}
+.prose .tips {
+  margin-top: 0;
+  color: inherit;
+}
+@media (max-width: 940px) {
+  .site-nav {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      'brand stats account'
+      'links links links';
+  }
+  .stats {
+    justify-self: end;
+  }
+}
+@media (max-width: 600px) {
+  .site-nav {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      'brand account'
+      'links links'
+      'stats stats';
+    gap: 10px 12px;
+    padding-bottom: 12px;
+  }
+  .nav-links {
+    gap: 2px;
+  }
+  .nav-link {
+    flex: 1 1 auto;
+    text-align: center;
+    padding: 7px 4px;
+    font-size: 14px;
+  }
+  /* One line: label and figure side by side. */
+  .site-nav .stats {
+    justify-self: stretch;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .site-nav .stats .stat {
+    flex-direction: row;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+  .site-nav .stats .stat b {
+    font-size: 13.5px;
+    white-space: nowrap;
+  }
+  .site-nav .stats .bar {
+    min-width: 44px;
+  }
+  .nav-account {
+    align-items: flex-end;
+  }
+  /* The round's own bar: the logo mark alone, so the progress and combo fit. */
+  .game-bar {
+    gap: 10px;
+  }
+  .game-bar .brand-name {
+    display: none;
+  }
+  .game-bar .bar {
+    min-width: 40px;
+  }
 }
 
 .bar {
@@ -185,8 +335,20 @@ button {
   border-radius: 10px;
   padding: 8px 14px;
 }
-button:hover {
+button:hover,
+a.button:hover {
   border-color: #3b4252;
+}
+a.button {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 8px 14px;
+  color: inherit;
+  text-decoration: none;
+}
+a.button.ghost {
+  background: transparent;
 }
 button:focus-visible,
 select:focus-visible {
@@ -504,6 +666,9 @@ select {
 .game-progress .bar {
   flex: 1;
 }
+.game-progress span {
+  white-space: nowrap;
+}
 .pill {
   border: 1px solid var(--border);
   border-radius: 99px;
@@ -741,9 +906,6 @@ select {
   }
   .trend {
     grid-template-columns: 1fr;
-  }
-  .stats {
-    gap: 14px;
   }
   .string-bars {
     grid-template-columns: repeat(2, minmax(0, 1fr));

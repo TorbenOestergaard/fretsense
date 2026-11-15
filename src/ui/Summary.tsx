@@ -1,16 +1,15 @@
 import { MASTERY_LABELS, MODE_TITLES, levelInfo, pointsOf, practiceMs } from '../game/progress';
 import type { RoundSummary } from './Game';
-import { Brand } from './Brand';
+import { hrefOf } from './route';
 import { useProgress } from './hooks';
 import { MASTERY_COLORS, MasteryMap, PositionGrid } from './MasteryMap';
 
 interface Props {
   summary: RoundSummary;
   onAgain: () => void;
-  onHome: () => void;
 }
 
-export function Summary({ summary, onAgain, onHome }: Props) {
+export function Summary({ summary, onAgain }: Props) {
   const data = useProgress();
   const { results } = summary;
   const firstTries = results.filter((r) => r.firstTry);
@@ -44,9 +43,9 @@ export function Summary({ summary, onAgain, onHome }: Props) {
     .slice(0, 5);
 
   return (
-    <main className="page">
-      <header className="topbar">
-        <Brand onHome={onHome} title="Round complete" />
+    <main className="page-body">
+      <header className="page-head">
+        <h1>Round complete</h1>
         <span className="muted">
           {MODE_TITLES[summary.mode]}
           {summary.context ? ` · ${summary.context}` : ''}
@@ -125,9 +124,12 @@ export function Summary({ summary, onAgain, onHome }: Props) {
         <button className="primary" onClick={onAgain} autoFocus>
           Another round
         </button>
-        <button className="ghost" onClick={onHome}>
-          Back to overview
-        </button>
+        <a className="button ghost" href={hrefOf('practice')}>
+          Back to practice
+        </a>
+        <a className="button ghost" href={hrefOf('progress')}>
+          See progress
+        </a>
       </div>
     </main>
   );

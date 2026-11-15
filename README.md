@@ -13,7 +13,9 @@ npm run dev
 ```
 
 Open http://localhost:5183 in Chrome, press **Start round**, and allow the microphone.
-Do the **Mic check and tuner** first: tune up, and confirm all six open strings are recognised.
+Do the mic check on the **Mic & tuner** page first: tune up, and confirm all six open strings are recognised.
+
+The pages are **Practice**, **Progress**, **Mic & tuner** and **About**, in a navigation bar that is the same on every page and also shows level, streak, today's count and the account with its sync status. Each page has its own address in the hash (`#/progress`, `#/mic`, `#/about`, `#/account`), so back, forward, reload and bookmarks work and the static site needs no server rewrite. During a round the navigation gives way to the round's own bar; the logo, Quit, Esc and the browser's back button all leave the round, and answers already given stay recorded.
 
 ```bash
 npm test
@@ -64,7 +66,7 @@ damps it in both directions: one lucky fast answer makes a note Shaky, not Insta
 four to get there; one slip or slow answer on a well-known note leaves it Instant, two drop it
 to Solid.
 
-The **Progress** view (top right of the home screen) shows, per exercise: the status map, the same map coloured by average
+The **Progress** page shows, per exercise: the status map, the same map coloured by average
 time, average time per string, note and fret (or per position and degree), and average time
 and first-try rate per practice day. The timing charts can be limited to naturals or to sharps
 and flats, so days with harder material do not look like a step back. A stamina chart shows
@@ -122,7 +124,7 @@ It also listens for one note at a time. Mute the other strings.
 
 - Clicking a fret on the on-screen fretboard answers the question (also the fallback when the
   microphone is unavailable).
-- Open `/?debug` to expose `fretsense.mic` in the console. `await fretsense.mic.startSynth()`
+- Open `/?debug` (it combines with the page addresses, as in `/?debug#/mic`) to expose `fretsense.mic` in the console. `await fretsense.mic.startSynth()`
   replaces the microphone with a test-tone source feeding the same analysis chain, and
   `fretsense.mic.pluck(48)` plays a C3 into it. The mic check screen gets a "Use test tones"
   button in this mode.
@@ -181,7 +183,7 @@ Progress is stored in the browser's localStorage. That copy is always the master
 fully without an account and without a network. Each browser and each address (`localhost:5183`,
 the deployed site) has its own copy.
 
-**Sync is optional.** Open *Sign in to sync* at the top right of the home screen and create an
+**Sync is optional.** Open *Account* at the right of the navigation bar and create an
 account (email and password). From then on:
 
 - Signing in downloads the copy on the server, merges it with what is in the browser, and
@@ -190,7 +192,7 @@ account (email and password). From then on:
 - After that the app syncs when it loads, shortly after each finished round, and when the page
   is hidden or closed.
 - If the server cannot be reached (offline, or the free backend is paused), practice carries
-  on and the status under the account link says "Sync off" with the time of the last sync. It catches up on the
+  on and the status under Account in the navigation bar says "Sync off" with the time of the last sync. It catches up on the
   next successful sync.
 - A reset is synced too: resetting an exercise in one browser resets it in the others.
 
@@ -257,7 +259,7 @@ pull, push, delete account) and return it from `src/sync/backend.ts`. The stored
 
 ## Deploying
 
-The footer of the home screen shows the version from `package.json` and, when git is available
+The footer of every page and the About page show the version from `package.json` and, when git is available
 at build time, the short commit hash (`build-info.js`, passed in through Vite's `define`).
 
 The app is a static site. `.github/workflows/deploy.yml` tests, builds and publishes it to
