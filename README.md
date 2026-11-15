@@ -68,6 +68,23 @@ and first-try rate per practice day. The timing charts can be limited to natural
 and flats, so days with harder material do not look like a step back. A stamina chart shows
 correct notes per day against the daily goal of 40, across all exercises.
 
+### Points and levels
+
+Points say two things: how long you have practised and how much of the neck you know.
+
+- **Time:** one point per minute practised. Time is taken from the answer log: the time between
+  one answer and the next, as long as that is 30 seconds or less. A longer pause is a break and
+  does not count.
+- **Status:** one point for every item that is Solid and two for every item that is Instant, in
+  all three exercises. That is at most 528 points (Note finder 144, String sweep 144, Scale
+  positions 240). These points follow the current status, so they drop again when an item slips,
+  and the level can drop with them.
+
+Level *L* starts at 15·*L*·(*L*−1) points: level 2 at 30, level 3 at 90, level 5 at 300, level
+10 at 1350. With ten minutes a day that is roughly three to four weeks to level 5 and three to
+four and a half months to level 10. Nothing is added up per answer: points are worked out from
+the log and the statistics each time, which is why they are the same in every synced browser.
+
 Suggested routine: 5–10 minutes a day. Start with naturals only on the D, G and B strings in the
 Note finder, switch on sharps and flats once those rows turn yellow and green, and add a Scale positions
 round in the key you are currently playing in.
@@ -147,7 +164,7 @@ src/music/theory.ts     tuning, note names, scales, degree spelling
 src/audio/pitch.ts      pitch + level + noise gate per analysis window
 src/audio/noteTracker.ts  pitch stream -> one event per pluck
 src/audio/mic.ts        microphone / test-tone source, Web Audio wiring
-src/game/progress.ts    per-exercise stats, mastery, answer log, XP, streaks, localStorage
+src/game/progress.ts    per-exercise stats, mastery, answer log, points and levels, streaks, localStorage
 src/game/analytics.ts   averages per string, note, fret, position and day from the answer log
 src/game/scheduler.ts   what to ask next
 src/game/session.ts     one round as a state machine
@@ -177,10 +194,11 @@ account (email and password). From then on:
 
 **How merging works** (`src/sync/merge.ts`, tests in `merge.test.ts`). The answer log is the
 source of truth. Two logs are combined by taking every answer in either one once (same
-timestamp, exercise and item = same answer). Per-item statistics, per-day totals and XP are then
-worked out again from the combined log, so the same data arriving twice changes nothing. XP is
-the one approximation: when both browsers practised separately on the same day, that day's XP
-is the larger side's plus a proportional share of the other's.
+timestamp, exercise and item = same answer). Per-item statistics, per-day totals and practice
+time are then worked out again from the combined log, so the same data arriving twice changes
+nothing, and two merged browsers show the same points and level as one browser that recorded
+all of it. Day totals and practice time that are no longer in the log (answers past the
+30,000-answer limit, or of an exercise that was reset) are kept as stored.
 
 **Backup file.** *Progress → Backup* exports everything to a JSON file and merges such a file
 back in. It needs no account and is independent of the server.
@@ -190,7 +208,7 @@ back in. It needs no account and is independent of the server.
 - Without an account nothing leaves the browser. Microphone audio is analysed locally and is
   never sent or stored.
 - With an account the server holds: your email address, a hashed password, and one row with the
-  practice record (answer log, statistics, XP, days, exercise settings). The microphone choice
+  practice record (answer log, statistics, days with practice time, exercise settings). The microphone choice
   and sensitivity stay on the device.
 - No analytics, no ads, no tracking cookies, no third-party scripts. The only outside requests
   are to the sync server, and only when signed in. The sign-in session is kept in localStorage.
