@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { mic } from './audio/mic';
 import { progressStore } from './game/progress';
+import { sync } from './sync/sync';
+import { Account } from './ui/Account';
 import { Game, type RoundSummary } from './ui/Game';
 import { Home } from './ui/Home';
 import { MicCheck } from './ui/MicCheck';
 import { Progress } from './ui/Progress';
 import { Summary } from './ui/Summary';
 
-type View = { name: 'home' } | { name: 'mic' } | { name: 'progress' } | { name: 'game'; id: number } | { name: 'summary'; summary: RoundSummary };
+type View = { name: 'home' } | { name: 'mic' } | { name: 'progress' } | { name: 'account' } | { name: 'game'; id: number } | { name: 'summary'; summary: RoundSummary };
 
 export function App() {
   const [view, setView] = useState<View>({ name: 'home' });
@@ -26,13 +28,18 @@ export function App() {
 
   switch (view.name) {
     case 'home':
-      return <Home onStart={() => void start()} onMic={() => setView({ name: 'mic' })} onProgress={() => setView({ name: 'progress' })} />;
+      return <Home onStart={() => void start()} onMic={() => setView({ name: 'mic' })} onProgress={() => setView({ name: 'progress' })} onAccount={() => setView({ name: 'account' })} />;
     case 'progress':
       return <Progress onBack={home} />;
+    case 'account':
+      return <Account onBack={home} />;
     case 'mic':
       return <MicCheck onBack={home} />;
     case 'game':
-      return <Game key={view.id} onDone={(summary) => setView({ name: 'summary', summary })} onQuit={home} />;
+      return <Game key={view.id} onDone={(summary) => {
+            sync.requestSync();
+            setView({ name: 'summary', summary });
+          }} onQuit={home} />;
     case 'summary':
       return <Summary summary={view.summary} onAgain={() => void start()} onHome={home} />;
   }

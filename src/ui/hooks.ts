@@ -2,9 +2,14 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { mic, type MicState } from '../audio/mic';
 import type { Frame } from '../audio/pitch';
 import { progressStore, type ProgressData } from '../game/progress';
+import { sync, type SyncState } from '../sync/sync';
 
 export function useProgress(): ProgressData {
   return useSyncExternalStore(progressStore.subscribe, progressStore.get);
+}
+
+export function useSync(): SyncState {
+  return useSyncExternalStore(sync.subscribe, sync.getState);
 }
 
 export function useMicState(): MicState {

@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@nhost/nhost-js": "^4.9.0",
     "pitchy": "^4.1.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

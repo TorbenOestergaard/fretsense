@@ -1,7 +1,8 @@
 import { DAILY_GOAL, dayKey, levelInfo, progressStore, streakOf, type Mode, type PositionHelp } from '../game/progress';
 import { SCALES, SCALE_IDS, STRING_NAMES, buildScale, parseNote, positionsOf } from '../music/theory';
 import { positionFrets } from './Game';
-import { useMicState, useProgress } from './hooks';
+import { syncStatus } from './Account';
+import { useMicState, useProgress, useSync } from './hooks';
 import { MasteryMap, PositionGrid } from './MasteryMap';
 
 const MODES: { id: Mode; title: string; blurb: string }[] = [
@@ -20,9 +21,12 @@ interface Props {
   onStart: () => void;
   onMic: () => void;
   onProgress: () => void;
+  onAccount: () => void;
 }
 
-export function Home({ onStart, onMic, onProgress }: Props) {
+export function Home({ onStart, onMic, onProgress, onAccount }: Props) {
+  const syncState = useSync();
+  const status = syncStatus(syncState, Date.now());
   const data = useProgress();
   const micState = useMicState();
   const { settings } = data;
@@ -226,6 +230,14 @@ export function Home({ onStart, onMic, onProgress }: Props) {
         {micState.message && <p className="warn">{micState.message}</p>}
       </section>
 
+      <footer className="sync-line">
+        <span className={status.tone === 'off' ? 'warn small' : 'muted small'} role="status">
+          {status.text}
+        </span>
+        <button className="link small" onClick={onAccount}>
+          {syncState.user ? 'Account' : syncState.available ? 'Sign in to sync' : 'About your data'}
+        </button>
+      </footer>
     </main>
   );
 }

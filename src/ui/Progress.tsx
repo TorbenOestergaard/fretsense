@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { bucketOf, dailySeries, eventsFor, groupBy, lastDays, parsePositionKey, type Bucket, type DayPoint, type NoteFilter } from '../game/analytics';
 import { DAILY_GOAL, MODES, MODE_TITLES, dayKey, levelInfo, progressStore, streakOf, type Mode, type ProgressData } from '../game/progress';
 import { SCALES, SCALE_IDS, STRING_NAMES, degreeOrdinal, pcName, type ScaleId } from '../music/theory';
+import { importProgress, looksLikeProgress, toSyncDoc } from '../sync/merge';
+import { sync } from '../sync/sync';
 import { useProgress } from './hooks';
 import { MasteryMap, PositionGrid, type MapView } from './MasteryMap';
 
@@ -23,6 +25,32 @@ export function Progress({ onBack }: { onBack: () => void }) {
   const [view, setView] = useState<MapView>('status');
   const [filter, setFilter] = useState<NoteFilter>('all');
   const [scaleId, setScaleId] = useState<ScaleId>(data.settings.scaleId);
+  const [backupNote, setBackupNote] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const exportFile = () => {
+    const file = { app: 'fretsense', exported: new Date().toISOString(), ...toSyncDoc(progressStore.get()) };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(file)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `fretsense-progress-${dayKey(Date.now())}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setBackupNote(`Saved ${file.events.length} answers to your downloads folder.`);
+  };
+  const importFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (!looksLikeProgress(parsed)) throw new Error('not a backup');
+      const before = progressStore.get().events.length;
+      progressStore.set(importProgress(progressStore.get(), parsed, Date.now()));
+      sync.requestSync(0);
+      setBackupNote(`Backup merged in: ${progressStore.get().events.length - before} answers added, nothing removed.`);
+    } catch {
+      setBackupNote('That file is not a Fretsense backup.');
+    }
+  };
 
   const now = Date.now();
   const level = levelInfo(data.xp);
@@ -179,12 +207,41 @@ export function Progress({ onBack }: { onBack: () => void }) {
       )}
 
       <section className="panel">
+        <h2>Backup</h2>
+        <p className="muted small">
+          Save all progress to a file, or merge a saved file into this browser. Works without an account, and is a way to move progress between browsers by hand.
+        </p>
+        <div className="start-row">
+          <button onClick={exportFile}>Export to file</button>
+          <button className="ghost" onClick={() => fileInput.current?.click()}>
+            Import from file
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(e) => {
+              void importFile(e.target.files?.[0]);
+              e.target.value = '';
+            }}
+          />
+          {backupNote && (
+            <span className="muted small" role="status">
+              {backupNote}
+            </span>
+          )}
+        </div>
+      </section>
+
+      <section className="panel">
         <h2>Reset</h2>
         <div className="start-row">
           <button
             className="ghost danger"
             onClick={() => {
               if (confirm(`Erase the ${MODE_TITLES[mode]} statistics? This cannot be undone.`)) progressStore.reset(mode);
+              sync.requestSync(0);
             }}
           >
             Reset {MODE_TITLES[mode]}
@@ -193,6 +250,7 @@ export function Progress({ onBack }: { onBack: () => void }) {
             className="ghost danger"
             onClick={() => {
               if (confirm('Erase all progress, including XP and streak? This cannot be undone.')) progressStore.reset();
+              sync.requestSync(0);
             }}
           >
             Reset everything

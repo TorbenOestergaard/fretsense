@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { mic } from './audio/mic';
+import { sync } from './sync/sync';
 import './styles.css';
 
 // With ?debug in the URL, expose the audio engine so the whole chain can be driven with
@@ -9,6 +10,9 @@ import './styles.css';
 if (new URLSearchParams(location.search).has('debug')) {
   (window as unknown as { fretsense: unknown }).fretsense = { mic };
 }
+
+// Optional sync: does nothing unless signed in, and never blocks practice.
+sync.start();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -146,11 +146,88 @@ src/game/progress.ts    per-exercise stats, mastery, answer log, XP, streaks, lo
 src/game/analytics.ts   averages per string, note, fret, position and day from the answer log
 src/game/scheduler.ts   what to ask next
 src/game/session.ts     one round as a state machine
+src/sync/               optional sign-in and sync: merge logic, backend interface, Nhost adapter
 src/ui/                 React screens
+backend/                SQL to create the sync table
 ```
 
-Progress is stored in the browser's localStorage, per address: practice on `localhost:5183` and
-practice on the deployed site are kept separately, and so is each browser.
+## Where progress is stored, and sync
+
+Progress is stored in the browser's localStorage. That copy is always the master: the app works
+fully without an account and without a network. Each browser and each address (`localhost:5183`,
+the deployed site) has its own copy.
+
+**Sync is optional.** Open *Sign in to sync* at the bottom of the home screen and create an
+account (email and password). From then on:
+
+- Signing in downloads the copy on the server, merges it with what is in the browser, and
+  uploads the result. Signing in on a second browser therefore adds its answers to the first
+  browser's; nothing is overwritten.
+- After that the app syncs when it loads, shortly after each finished round, and when the page
+  is hidden or closed.
+- If the server cannot be reached (offline, or the free backend is paused), practice carries
+  on and the status line says "Sync off" with the time of the last sync. It catches up on the
+  next successful sync.
+- A reset is synced too: resetting an exercise in one browser resets it in the others.
+
+**How merging works** (`src/sync/merge.ts`, tests in `merge.test.ts`). The answer log is the
+source of truth. Two logs are combined by taking every answer in either one once (same
+timestamp, exercise and item = same answer). Per-item statistics, per-day totals and XP are then
+worked out again from the combined log, so the same data arriving twice changes nothing. XP is
+the one approximation: when both browsers practised separately on the same day, that day's XP
+is the larger side's plus a proportional share of the other's.
+
+**Backup file.** *Progress → Backup* exports everything to a JSON file and merges such a file
+back in. It needs no account and is independent of the server.
+
+### Privacy
+
+- Without an account nothing leaves the browser. Microphone audio is analysed locally and is
+  never sent or stored.
+- With an account the server holds: your email address, a hashed password, and one row with the
+  practice record (answer log, statistics, XP, days, exercise settings). The microphone choice
+  and sensitivity stay on the device.
+- No analytics, no ads, no tracking cookies, no third-party scripts. The only outside requests
+  are to the sync server, and only when signed in. The sign-in session is kept in localStorage.
+- Each account can read and write only its own row (enforced by the database permissions
+  below, not by the app).
+- *Account and sync → Delete account and synced progress* removes the server copy and the
+  account. Local progress stays until you use Reset.
+
+### Backend setup (Nhost)
+
+The backend is an [Nhost](https://nhost.io) project that can be shared with other apps, so
+everything belonging to this app is prefixed `fretsense_`. Accounts are shared across those apps.
+
+1. Put the project's subdomain and region in `src/sync/config.ts`. They are public values, not
+   secrets. With an empty subdomain the app builds without sync.
+2. Dashboard → Database → SQL Editor: paste `backend/nhost-setup.sql`, keep **Track this** on, run.
+3. Dashboard → Database → `fretsense_progress` → Edit Permissions, role **user**:
+
+   | Action | Row check | Columns | Column preset |
+   | --- | --- | --- | --- |
+   | Insert | Without any checks | `data` | `user_id` = `X-Hasura-User-Id` |
+   | Select | `user_id` `_eq` `X-Hasura-User-Id` | `data`, `updated_at` | |
+   | Update | `user_id` `_eq` `X-Hasura-User-Id` | `data` | |
+   | Delete | `user_id` `_eq` `X-Hasura-User-Id` | | |
+
+   Leave the **public** role without any permission.
+4. To let users delete their own account: table `auth.users` → Edit Permissions, role **user**,
+   Delete with check `id` `_eq` `X-Hasura-User-Id`. Without this the app still deletes the
+   synced progress but reports that the account itself remains.
+5. Settings → Sign-In Methods → Email and Password: switch **Require Verified Emails** off
+   (the free plan is not documented to send verification emails). The app also copes with it
+   being on: it then asks the new user to confirm by email before signing in.
+
+Notes on the free plan: a project is paused after one week of inactivity and is woken from the
+Nhost dashboard. The app treats a paused project like being offline.
+
+### Using another backend
+
+Only `src/sync/nhostAdapter.ts` knows about Nhost. To switch, write another file that implements
+the `SyncBackend` interface in `src/sync/types.ts` (sign up, sign in, sign out, current user,
+pull, push, delete account) and return it from `src/sync/backend.ts`. The stored document is the
+`SyncDoc` type in `src/sync/merge.ts`; any store that keeps one JSON document per user will do.
 
 ## Deploying
 
@@ -167,4 +244,3 @@ MIT, see [LICENSE](LICENSE).
 - Scale positions across two octaves in order (1 to 8 and back), and modes of the major scale.
 - Frets 13 and up.
 - Intervals from a moving root ("a major 3rd above this note, on the next string").
-- Export and import of progress.

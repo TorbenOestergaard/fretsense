@@ -90,7 +90,15 @@ export interface ProgressData {
   days: Record<string, DayStat>;
   sessions: SessionRecord[];
   settings: Settings;
+  /**
+   * When statistics were last erased, per exercise or for everything. Sync uses it so that a
+   * reset made in one browser is not undone by older answers arriving from another.
+   */
+  resets?: Resets;
 }
+
+/** `at` is when this record last changed; the newer record wins when two browsers sync. */
+export type Resets = Partial<Record<Mode | 'all', number>> & { at: number };
 
 export const FAST_MS = 2000;
 export const SLOW_MS = 8000;
@@ -100,8 +108,8 @@ export const RECENT_ATTEMPTS = 8;
 /** Fewer attempts than this are averaged as if the missing ones scored 0. */
 export const MIN_EVIDENCE = 4;
 const TIME_ALPHA = 0.3;
-const MAX_SESSIONS = 300;
-const MAX_EVENTS = 30000;
+export const MAX_SESSIONS = 300;
+export const MAX_EVENTS = 30000;
 
 export const DEFAULT_SETTINGS: Settings = {
   mode: 'notes',
@@ -251,20 +259,24 @@ export interface AnswerOutcome {
   after: MasteryLevel;
 }
 
+/** One more attempt on an item: `ok` is a first-try hit, `ms` the time it took. */
+export function advanceStat(prev: ItemStat | undefined, ok: 0 | 1, ms: number, now: number): ItemStat {
+  const prevMs = prev?.ms ?? 0;
+  return {
+    seen: (prev?.seen ?? 0) + 1,
+    correct: (prev?.correct ?? 0) + ok,
+    recent: [...(prev?.recent ?? []), ok ? speedScore(ms) : 0].slice(-RECENT_ATTEMPTS),
+    ms: !ok ? prevMs : prevMs === 0 ? ms : prevMs + TIME_ALPHA * (Math.min(ms, 2 * SLOW_MS) - prevMs),
+    last: now,
+  };
+}
+
 export function applyAnswer(data: ProgressData, answer: AnswerInput, now: number): AnswerOutcome {
   const group = data.stats[answer.mode];
   const prev = group[answer.key];
   const before = levelOf(prev);
   const ok = answer.firstTry ? 1 : 0;
-  const attempt = answer.firstTry ? speedScore(answer.ms) : 0;
-  const prevMs = prev?.ms ?? 0;
-  const next: ItemStat = {
-    seen: (prev?.seen ?? 0) + 1,
-    correct: (prev?.correct ?? 0) + ok,
-    recent: [...(prev?.recent ?? []), attempt].slice(-RECENT_ATTEMPTS),
-    ms: !answer.firstTry ? prevMs : prevMs === 0 ? answer.ms : prevMs + TIME_ALPHA * (Math.min(answer.ms, 2 * SLOW_MS) - prevMs),
-    last: now,
-  };
+  const next = advanceStat(prev, ok, answer.ms, now);
 
   const xp = xpFor(answer.firstTry, answer.ms, answer.combo);
   const today = dayKey(now);
@@ -336,12 +348,29 @@ export function migrateV1(old: Record<string, unknown>): ProgressData {
   };
 }
 
-function normaliseSettings(raw: Partial<Settings> | undefined): Settings {
+export function normaliseSettings(raw: Partial<Settings> | undefined): Settings {
   const settings = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
   if (!MODES.includes(settings.mode)) settings.mode = 'positions';
   if (!Array.isArray(settings.strings) || settings.strings.length !== STRING_COUNT) settings.strings = DEFAULT_SETTINGS.strings;
   if (!Array.isArray(settings.positions) || settings.positions.length !== 5) settings.positions = DEFAULT_SETTINGS.positions;
   return settings;
+}
+
+/** Fills in anything missing from stored, synced or imported progress. */
+export function normaliseProgress(raw: unknown): ProgressData {
+  const parsed = (raw && typeof raw === 'object' ? raw : {}) as Partial<ProgressData>;
+  const base = emptyProgress();
+  return {
+    ...base,
+    ...parsed,
+    v: 2,
+    stats: { ...base.stats, ...(parsed.stats ?? {}) },
+    events: Array.isArray(parsed.events) ? parsed.events : [],
+    xp: typeof parsed.xp === 'number' ? parsed.xp : 0,
+    days: parsed.days && typeof parsed.days === 'object' ? parsed.days : {},
+    sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+    settings: normaliseSettings(parsed.settings),
+  };
 }
 
 function load(): ProgressData {
@@ -352,16 +381,7 @@ function load(): ProgressData {
       const v1 = localStorage.getItem(V1_KEY);
       return v1 ? migrateV1(JSON.parse(v1) as Record<string, unknown>) : emptyProgress();
     }
-    const parsed = JSON.parse(raw) as Partial<ProgressData>;
-    const base = emptyProgress();
-    return {
-      ...base,
-      ...parsed,
-      v: 2,
-      stats: { ...base.stats, ...(parsed.stats ?? {}) },
-      events: Array.isArray(parsed.events) ? parsed.events : [],
-      settings: normaliseSettings(parsed.settings),
-    };
+    return normaliseProgress(JSON.parse(raw));
   } catch {
     return emptyProgress();
   }
@@ -407,12 +427,14 @@ export const progressStore = {
   /** Erase the statistics of one exercise, or everything. */
   reset(mode?: Mode) {
     const current = progressStore.get();
+    const now = Date.now();
     if (!mode) {
-      progressStore.set({ ...emptyProgress(), settings: current.settings });
+      progressStore.set({ ...emptyProgress(), settings: current.settings, resets: { at: now, all: now } });
       return;
     }
     progressStore.set({
       ...current,
+      resets: { ...current.resets, at: now, [mode]: now },
       stats: { ...current.stats, [mode]: {} },
       events: current.events.filter((e) => e.m !== mode),
       sessions: current.sessions.filter((s) => s.mode !== mode),
