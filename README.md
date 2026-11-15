@@ -215,9 +215,10 @@ everything belonging to this app is prefixed `fretsense_`. Accounts are shared a
 4. To let users delete their own account: table `auth.users` → Edit Permissions, role **user**,
    Delete with check `id` `_eq` `X-Hasura-User-Id`. Without this the app still deletes the
    synced progress but reports that the account itself remains.
-5. Settings → Sign-In Methods → Email and Password: switch **Require Verified Emails** off
-   (the free plan is not documented to send verification emails). The app also copes with it
-   being on: it then asks the new user to confirm by email before signing in.
+5. Email confirmation is on by default and works on the free plan: a new user gets an email
+   and must click the link before signing in. The link ends on the project's **Client URL**
+   (Auth settings), so set that to the deployed site, or switch **Require Verified Emails**
+   off under Sign-In Methods → Email and Password. The app handles both.
 
 Notes on the free plan: a project is paused after one week of inactivity and is woken from the
 Nhost dashboard. The app treats a paused project like being offline.
