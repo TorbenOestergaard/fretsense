@@ -51,6 +51,11 @@ export interface AnswerEvent {
   pc: number;
   ms: number;
   ok: 0 | 1;
+  /**
+   * 1 when the prompt was spoken and the clock started with the spoken word. Absent for prompts
+   * read from the screen, which is every answer recorded before spoken prompts existed.
+   */
+  sp?: 1;
 }
 
 export interface DayStat {
@@ -339,6 +344,8 @@ export interface AnswerInput {
   fret?: number | null;
   firstTry: boolean;
   ms: number;
+  /** The prompt was spoken (see AnswerEvent.sp). */
+  spoken?: boolean;
 }
 
 export interface AnswerOutcome {
@@ -378,6 +385,7 @@ export function applyAnswer(data: ProgressData, answer: AnswerInput, now: number
     ms: Math.round(answer.ms),
     ok,
   };
+  if (answer.spoken) event.sp = 1;
   const last = data.events.length ? data.events[data.events.length - 1].t : null;
   // Data from an older build may lack the day's time; then it starts from what the log says.
   const dayMs = day.ms ?? practiceByDay(data.events)[today] ?? 0;

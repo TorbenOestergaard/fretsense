@@ -14,6 +14,8 @@ export interface MicState {
 }
 
 const FRAME_INTERVAL_MS = 24;
+/** How long after a spoken prompt the microphone stays shut. */
+export const DUCK_TAIL_MS = 200;
 
 /**
  * Microphone -> AnalyserNode -> pitch frames -> note events.
@@ -35,7 +37,33 @@ class MicEngine {
   private timer: ReturnType<typeof setInterval> | null = null;
   private tracker = new NoteTracker();
   private sensitivity: keyof typeof GATES = 'normal';
+  private ducked = false;
+  private duckUntil = 0;
   lastFrame: Frame | null = null;
+
+  /** The running audio context, so that feedback sounds can share it. */
+  get context(): AudioContext | null {
+    return this.ctx;
+  }
+
+  /**
+   * Stop listening while the app speaks: the microphone hears the laptop speaker, and speech has
+   * pitched vowels inside the guitar's range. Frames are reported as silence until unduck().
+   */
+  duck() {
+    this.ducked = true;
+  }
+
+  /** Listen again, after a short tail for the room to go quiet. */
+  unduck(tailMs = DUCK_TAIL_MS) {
+    if (!this.ducked) return;
+    this.ducked = false;
+    this.duckUntil = performance.now() + tailMs;
+  }
+
+  get isDucked(): boolean {
+    return this.ducked || performance.now() < this.duckUntil;
+  }
 
   getState = (): MicState => this.state;
 
@@ -173,7 +201,8 @@ class MicEngine {
   private step() {
     if (!this.analyser || !this.analyzer || !this.buf) return;
     this.analyser.getFloatTimeDomainData(this.buf);
-    const frame = this.analyzer.analyze(this.buf, performance.now());
+    const now = performance.now();
+    const frame = this.analyzer.analyze(this.buf, now, this.ducked || now < this.duckUntil);
     this.lastFrame = frame;
     this.frameListeners.forEach((fn) => fn(frame));
     for (const event of this.tracker.push(frame)) this.noteListeners.forEach((fn) => fn(event));

@@ -72,8 +72,14 @@ export class PitchAnalyzer {
     this.gate = gate;
   }
 
-  analyze(buf: Float32Array, t: number): Frame {
+  /**
+   * `muted` is for the moments the app itself is making sound (a spoken prompt): the frame
+   * reports nothing pitched, and the background estimate is left alone so that speech from the
+   * laptop speaker does not raise the gate against a quiet guitar.
+   */
+  analyze(buf: Float32Array, t: number, muted = false): Frame {
     const rms = rmsOf(buf);
+    if (muted) return { t, midi: null, cents: 0, freq: 0, clarity: 0, rms, noiseFloor: this.noiseFloor };
     const [freq, clarity] = this.detector.findPitch(buf, this.sampleRate);
     this.trackNoise(rms, clarity);
 

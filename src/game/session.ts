@@ -15,6 +15,8 @@ export interface AnswerResult {
   mistakes: number;
   /** Combo count after this answer. */
   combo: number;
+  /** The prompt was spoken, and the clock started with the spoken word. */
+  spoken: boolean;
 }
 
 export type Hint =
@@ -42,6 +44,10 @@ const MIN_REACTION_MS = 150;
  * Entering a new scale box starts with an untimed step: play the root. Getting your hand into
  * the box is not what is being measured, so the clock only runs for the degrees that follow.
  * Another pass through the box you are already in does not repeat that step.
+ *
+ * With `gated` set, a new question waits for startClock() before it is timed or can be answered.
+ * That is for spoken prompts: the clock starts when the word to act on begins to sound, so that
+ * hearing it is inside the measured time the way reading is for a prompt on the screen.
  */
 export class Session {
   phase: Phase = 'asking';
@@ -56,16 +62,29 @@ export class Session {
   private mistakes = 0;
   private revealed = false;
   private feedbackUntil = 0;
+  /** A question is up but its clock has not started yet (gated sessions only). */
+  waiting = false;
+  private spoken = false;
 
   constructor(
     private readonly scheduler: Scheduler,
     public total: number,
     now: number,
     private readonly onResult: (result: AnswerResult) => void = () => {},
+    private readonly gated = false,
   ) {
     this.question = scheduler.next();
     this.askedAt = now;
     if (this.question.position) this.phase = 'intro';
+    else this.waiting = gated;
+  }
+
+  /** Starts the clock of a waiting question. `spoken` says whether its prompt was spoken. */
+  startClock(t: number, spoken = false) {
+    if (!this.waiting) return;
+    this.waiting = false;
+    this.spoken = spoken;
+    this.askedAt = t;
   }
 
   /** Pitches of the root inside the current box. */
@@ -79,6 +98,8 @@ export class Session {
     this.phase = 'asking';
     this.askedAt = t;
     this.hint = null;
+    this.waiting = this.gated;
+    this.spoken = false;
   }
 
   /** A new note started sounding. */
@@ -87,14 +108,14 @@ export class Session {
       if (t - this.askedAt >= MIN_REACTION_MS && this.rootMidis().includes(midi)) this.begin(t);
       return;
     }
-    if (this.phase !== 'asking' && this.phase !== 'revealed') return;
+    if (this.waiting || (this.phase !== 'asking' && this.phase !== 'revealed')) return;
     if (t - this.askedAt < MIN_REACTION_MS) return;
     if (this.question.targets.includes(midi)) this.resolve(t, true, midi);
   }
 
   /** A note has been held long enough to count as a deliberate answer. */
   noteHeld(midi: number, t: number) {
-    if (this.phase !== 'asking' && this.phase !== 'revealed') return;
+    if (this.waiting || (this.phase !== 'asking' && this.phase !== 'revealed')) return;
     if (t - this.askedAt < MIN_REACTION_MS) return;
     if (this.question.targets.includes(midi)) return;
     if (pcOf(midi) === this.question.pc) {
@@ -114,6 +135,7 @@ export class Session {
       return;
     }
     if (this.phase !== 'asking' && this.phase !== 'revealed') return;
+    this.startClock(t);
     if (this.question.string !== null && string !== this.question.string) {
       this.miss({ kind: 'wrongString', string });
       return;
@@ -125,6 +147,7 @@ export class Session {
 
   /** Space bar: start the box, show the answer, or move on once it is shown. */
   skip(t: number) {
+    this.startClock(t);
     if (this.phase === 'intro') this.begin(t);
     else if (this.phase === 'asking') this.reveal();
     else if (this.phase === 'revealed') this.resolve(t, false);
@@ -133,7 +156,7 @@ export class Session {
 
   /** Drive timeouts. Returns true when something changed. */
   tick(t: number): boolean {
-    if (this.phase === 'asking' && t - this.askedAt >= REVEAL_AFTER_MS) {
+    if (this.phase === 'asking' && !this.waiting && t - this.askedAt >= REVEAL_AFTER_MS) {
       this.reveal();
       return true;
     }
@@ -175,6 +198,7 @@ export class Session {
       revealed: this.revealed,
       mistakes: this.mistakes,
       combo: this.combo,
+      spoken: this.spoken,
     };
     this.results.push(result);
     this.lastResult = result;
@@ -196,6 +220,8 @@ export class Session {
     this.mistakes = 0;
     this.revealed = false;
     this.hint = null;
+    this.spoken = false;
     this.phase = this.question.position && this.question.position !== previous ? 'intro' : 'asking';
+    this.waiting = this.gated && this.phase === 'asking';
   }
 }

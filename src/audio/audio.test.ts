@@ -146,3 +146,46 @@ describe('note tracking', () => {
     expect(events.filter((e) => e.type === 'held')).toEqual([]);
   });
 });
+
+describe('ducking while the app speaks', () => {
+  /** Runs the chain with the analyser muted between two times (seconds), as mic.duck() does. */
+  function runDucked(signal: Float32Array, from: number, to: number, duck = true) {
+    const analyzer = new PitchAnalyzer(SIZE, SR);
+    const tracker = new NoteTracker();
+    const frames: Frame[] = [];
+    const ons: NoteEvent[] = [];
+    for (let end = SIZE; end <= signal.length; end += HOP) {
+      const t = end / SR;
+      const frame = analyzer.analyze(signal.subarray(end - SIZE, end), t * 1000, duck && t >= from && t < to);
+      frames.push(frame);
+      ons.push(...tracker.push(frame).filter((e) => e.type === 'on'));
+    }
+    return { frames, ons };
+  }
+
+  /** A quiet note at 2.0 s, after one second of "speech" from the speaker: a loud vowel, then a loud hiss. */
+  function withSpeech() {
+    const signal = render(3, [{ at: 2.0, midi: 52, amp: 0.006 }]);
+    const noise = makeNoise(9);
+    for (let i = Math.round(0.6 * SR); i < Math.round(1.6 * SR); i++) {
+      const t = i / SR;
+      const vowel = t < 1.2 ? Math.sin(2 * Math.PI * 147 * t) + 0.6 * Math.sin(2 * Math.PI * 294 * t) + 0.3 * Math.sin(2 * Math.PI * 441 * t) : 0;
+      const hiss = t >= 1.2 ? noise() * 2 : 0;
+      signal[i] += 0.05 * (vowel + hiss);
+    }
+    return signal;
+  }
+
+  it('would take a spoken vowel for a note if it kept listening', () => {
+    const { ons } = runDucked(withSpeech(), 0.5, 1.8, false);
+    expect(ons[0]?.midi).toBe(50); // D3, 147 Hz: the "speech", not the guitar
+  });
+
+  it('hears nothing while ducked, leaves the noise floor alone, and catches a quiet note right after', () => {
+    const { frames, ons } = runDucked(withSpeech(), 0.5, 1.8);
+    expect(ons.map((e) => e.midi)).toEqual([52]);
+    const at = (seconds: number) => frames[Math.round((seconds * SR - SIZE) / HOP)];
+    expect(at(1.75).noiseFloor).toBeCloseTo(at(0.45).noiseFloor, 6);
+    expect(frames.filter((f) => f.t >= 500 && f.t < 1800).every((f) => f.midi === null)).toBe(true);
+  });
+});

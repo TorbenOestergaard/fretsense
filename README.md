@@ -53,6 +53,37 @@ nothing.
 In every exercise a wrong note does not end the question. After 12 seconds (or Space) the
 answer is shown, and you play it to continue.
 
+### Spoken prompts
+
+To practise with your eyes on the fretboard, press **V** in a round (or the *Voice* button in
+the top bar). The choice is remembered per browser. The screen keeps showing everything, so a
+glance still works when a word is missed, and **R** says the prompt again.
+
+| Situation | Spoken |
+| --- | --- |
+| Note finder | "G string." "C sharp." |
+| String sweep | "Every" "C sharp." once per note; the strings that follow get no words |
+| Scale positions, new box | "G major, position 2. Play the root." (the key only at the start) |
+| Scale positions, degree | "Fifth." "Flat seventh." "Root." |
+| Answer shown (12 s or Space) | "Fret 3." or, in a box, "D. A string, fret 5." |
+| Round end | "Round done. 18 of 20 first try. Average 2.4 seconds." |
+
+A sharp or flat is spoken under one of its two names, picked at random per question. An accepted
+answer gives a short tick and a wrong note a low thud.
+
+- **Voice.** The browser's built-in speech with a voice installed on the computer (Samantha on
+  a Mac, if present). Voices that work through a server, such as Chrome's "Google" voices, are
+  never used, so nothing leaves the browser. Without a local English voice the button is disabled.
+- **The microphone hears the speaker.** While the app speaks, and for 200 ms after, the
+  listening is switched off, and the background level estimate is frozen. A note plucked before
+  the prompt has finished is therefore not heard: play it again. The tick and the thud are noise
+  without a pitch, which the detector ignores anyway.
+- **Timing.** The clock starts when the last word, the one to act on, begins to sound. Hearing
+  that word is then inside the measured time, as reading is for a prompt on the screen. In a
+  sweep the strings after the first are timed exactly as without voice.
+- **Statistics.** Spoken answers count towards the same status and points. They carry a mark in
+  the answer log (`sp`), so they can be told apart later.
+
 ### Status and progress
 
 A note only counts as known when it is both right and fast, because "working it out from the
@@ -168,10 +199,12 @@ src/music/theory.ts     tuning, note names, scales, degree spelling
 src/audio/pitch.ts      pitch + level + noise gate per analysis window
 src/audio/noteTracker.ts  pitch stream -> one event per pluck
 src/audio/mic.ts        microphone / test-tone source, Web Audio wiring
+src/audio/voice.ts      spoken prompts (speechSynthesis, local voices only), tick and thud
 src/game/progress.ts    per-exercise stats, mastery, answer log, points and levels, streaks, localStorage
 src/game/analytics.ts   averages per string, note, fret, position and day from the answer log
 src/game/scheduler.ts   what to ask next
 src/game/session.ts     one round as a state machine
+src/game/spoken.ts      what is said for each prompt, answer and round summary
 src/sync/               optional sign-in and sync: merge logic, backend interface, Nhost adapter
 src/ui/                 React screens
 backend/                SQL to create the sync table

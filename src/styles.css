@@ -655,6 +655,9 @@ select {
   align-items: center;
   gap: 12px;
 }
+.game-bar button {
+  white-space: nowrap;
+}
 .game-progress {
   flex: 1;
   display: flex;

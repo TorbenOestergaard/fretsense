@@ -21,6 +21,22 @@ function play(data: ProgressData, t: number, n: number, opts: { mode?: Mode; str
 const core = (d: ProgressData) => ({ stats: d.stats, events: d.events, xp: d.xp, days: d.days, sessions: d.sessions });
 
 describe('mergeProgress', () => {
+  it('keeps the mark on answers to spoken prompts, through merging, the server format and reloading', () => {
+    const answer = { mode: 'notes' as const, key: itemKey(2, 5), pc: 5, string: 2, fret: 3, firstTry: true, ms: 1800 };
+    const a = applyAnswer(play(emptyProgress(), T0, 3), { ...answer, spoken: true }, T0 + 60000).data;
+    const b = play(emptyProgress(), T0 + DAY, 3, { string: 4 });
+    for (const merged of [mergeProgress(a, b), mergeProgress(b, a), mergeProgress(mergeProgress(a, b), a)]) {
+      expect(merged.events.filter((e) => e.sp === 1).map((e) => e.t)).toEqual([T0 + 60000]);
+      expect(merged.events).toHaveLength(7);
+    }
+    const reloaded = normaliseProgress(JSON.parse(JSON.stringify(fromSyncDoc(toSyncDoc(a)))));
+    expect(reloaded.events).toEqual(a.events);
+    // The mark changes nothing else: same statistics as the same answer read from the screen.
+    const plain = applyAnswer(play(emptyProgress(), T0, 3), answer, T0 + 60000).data;
+    expect(a.stats).toEqual(plain.stats);
+    expect(a.days).toEqual(plain.days);
+  });
+
   it('uploading to an empty server and downloading into an empty browser both keep everything', () => {
     const a = play(emptyProgress(), T0, 12);
     expect(core(mergeProgress(a, emptyProgress()))).toEqual(core(a));

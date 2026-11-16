@@ -1,8 +1,10 @@
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { mic } from '../audio/mic';
+import { voice } from '../audio/voice';
 import { pointsOf, practiceMs, progressStore, type MasteryLevel, type Mode, type Points } from '../game/progress';
-import { Scheduler } from '../game/scheduler';
-import { REVEAL_AFTER_MS, Session, type AnswerResult } from '../game/session';
+import { Scheduler, type Question } from '../game/scheduler';
+import { REVEAL_AFTER_MS, Session, type AnswerResult, type Hint } from '../game/session';
+import { introWords, promptWords, repeatWords, revealWords, summaryWords, type SpokenPrompt } from '../game/spoken';
 import { POSITION_MAX_FRET, STRING_NAMES, STRING_NUMBERS, midiName, pcName, pcOf, type ScalePosition } from '../music/theory';
 import { Fretboard, type CellStyle } from './Fretboard';
 import { Brand } from './Brand';
@@ -42,7 +44,7 @@ export function Game({ onDone, onQuit }: Props) {
     const onResult = (result: AnswerResult) => {
       const q = result.question;
       const outcome = progressStore.record(
-        { mode: q.mode, key: q.key, pc: q.pc, string: result.string, fret: result.fret, firstTry: result.firstTry, ms: result.ms },
+        { mode: q.mode, key: q.key, pc: q.pc, string: result.string, fret: result.fret, firstTry: result.firstTry, ms: result.ms, spoken: result.spoken },
         Date.now(),
       );
       const existing = totals.current.changes.find((c) => c.key === q.key);
@@ -51,7 +53,8 @@ export function Game({ onDone, onQuit }: Props) {
     };
     const start = progressStore.get();
     return {
-      run: new Session(scheduler, scheduler.roundLength(), performance.now(), onResult),
+      // Gated: each question waits for its clock to be started, by the spoken prompt or at once.
+      run: new Session(scheduler, scheduler.roundLength(), performance.now(), onResult, true),
       scheduler,
       mode: settings.mode,
       help: settings.positionHelp,
@@ -60,6 +63,29 @@ export function Game({ onDone, onQuit }: Props) {
   });
   const run = session.run;
   const scale = session.scheduler.scale;
+
+  const voiceState = useSyncExternalStore(voice.subscribe, voice.getState);
+  /** The stage (question and phase) that was last announced, so each is announced once. */
+  const announced = useRef<string | null>(null);
+  const spoken = useRef<{ index: number; prompt: SpokenPrompt | null } | null>(null);
+  const previousQuestion = useRef<Question | null>(null);
+  const lastHint = useRef<Hint | null>(null);
+
+  const toggleVoice = () => {
+    voice.setPrefs({ on: !voice.getState().on });
+    // Switched off while a prompt was being spoken: the question must not wait for it.
+    if (!voice.active) run.startClock(performance.now());
+    rerender();
+  };
+
+  /** Says the current prompt again. The clock keeps running. */
+  const repeat = () => {
+    if (!voice.active || run.waiting) return;
+    const q = run.question;
+    if (run.phase === 'intro') voice.say([introWords(q, run.index === 0)]);
+    else if (run.phase === 'asking') voice.say(repeatWords(q, spoken.current?.index === run.index ? spoken.current.prompt : null));
+    else if (run.phase === 'revealed') voice.say([revealWords(q)]);
+  };
 
   useEffect(() => {
     const offNote = mic.onNote((event) => {
@@ -76,20 +102,67 @@ export function Game({ onDone, onQuit }: Props) {
         run.skip(performance.now());
         rerender();
       } else if (e.code === 'Escape') onQuit();
+      else if (e.code === 'KeyV' && !e.metaKey && !e.ctrlKey && !e.altKey) toggleVoice();
+      else if (e.code === 'KeyR' && !e.metaKey && !e.ctrlKey && !e.altKey) repeat();
     };
     window.addEventListener('keydown', onKey);
     return () => {
       offNote();
       clearInterval(timer);
       window.removeEventListener('keydown', onKey);
+      // Leaving mid-round: stop talking. (The round summary is allowed to finish.)
+      if (run.phase !== 'done') voice.cancel();
+      announced.current = null;
     };
+    // toggleVoice and repeat only read refs and the session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run, onQuit]);
+
+  // Announce each new stage of the round once: speak the prompt and start the clock with the
+  // word to act on, or start it at once when nothing is spoken.
+  useEffect(() => {
+    const speak = voice.active;
+    if (run.hint && run.hint !== lastHint.current && run.hint.kind !== 'octave' && speak) voice.thud();
+    lastHint.current = run.hint;
+
+    const stage = `${run.index}:${run.phase}`;
+    if (announced.current === stage) return;
+    announced.current = stage;
+    const q = run.question;
+    if (run.phase === 'intro') {
+      if (speak) voice.say([introWords(q, run.index === 0)]);
+    } else if (run.phase === 'asking') {
+      if (spoken.current?.index !== run.index) {
+        spoken.current = { index: run.index, prompt: promptWords(q, previousQuestion.current) };
+        previousQuestion.current = q;
+      }
+      const prompt = spoken.current.prompt;
+      if (!run.waiting) return;
+      if (speak && prompt) {
+        voice.say([...prompt.context, prompt.target], {
+          onTarget: (heard) => {
+            run.startClock(performance.now(), heard);
+            rerender();
+          },
+        });
+      } else {
+        run.startClock(performance.now());
+        rerender();
+      }
+    } else if (run.phase === 'revealed') {
+      if (speak) voice.say([revealWords(q)]);
+    } else if (run.phase === 'feedback') {
+      voice.cancel();
+      if (speak) voice.tick();
+    }
+  });
 
   const finished = run.phase === 'done';
   useEffect(() => {
     if (!finished) return;
     const firstTries = run.results.filter((r) => r.firstTry);
     const avgMs = firstTries.length ? firstTries.reduce((sum, r) => sum + r.ms, 0) / firstTries.length : 0;
+    if (voice.active) voice.say([summaryWords(run.results.length, firstTries.length, avgMs)]);
     progressStore.addSession({
       t: Date.now(),
       mode: session.mode,
@@ -170,6 +243,19 @@ export function Game({ onDone, onQuit }: Props) {
             {Math.min(run.index + 1, run.total)} / {run.total}
           </span>
         </div>
+        <button
+          className="ghost"
+          onClick={(e) => {
+            // Keep the focus off the button, so Space goes on showing the answer.
+            e.currentTarget.blur();
+            toggleVoice();
+          }}
+          disabled={!voiceState.available}
+          aria-pressed={voiceState.on && voiceState.available}
+          title={voiceState.available ? `Spoken prompts (V). Voice: ${voiceState.voiceName}` : 'No English voice is installed on this computer'}
+        >
+          Voice {voiceState.on && voiceState.available ? 'on' : 'off'}
+        </button>
         <div className={run.combo >= 5 ? 'pill pill-hot' : 'pill'}>Combo {run.combo}</div>
       </header>
 
@@ -197,7 +283,7 @@ export function Game({ onDone, onQuit }: Props) {
         <div className="countdown" aria-hidden="true">
           <div
             key={`${run.index}${intro ? 'i' : ''}`}
-            style={{ animationDuration: `${REVEAL_AFTER_MS}ms`, animationPlayState: run.phase === 'asking' ? 'running' : 'paused' }}
+            style={{ animationDuration: `${REVEAL_AFTER_MS}ms`, animationPlayState: run.phase === 'asking' && !run.waiting ? 'running' : 'paused' }}
           />
         </div>
         <p className="feedback" role="status">
@@ -230,7 +316,8 @@ export function Game({ onDone, onQuit }: Props) {
             .
           </span>
         )}
-        <span className="muted small">{intro ? 'Space starts without playing the root' : 'Space shows the answer'} · Esc quits</span>
+        <span className="muted small">{intro ? 'Space starts without playing the root' : 'Space shows the answer'}
+          {voiceState.on && voiceState.available ? ' · R says it again' : ''} · V voice · Esc quits</span>
       </footer>
     </main>
   );
